@@ -70,7 +70,7 @@ export default function AdminDashboard() {
     start_date: string;
     end_date: string;
   } | null>(null);
-  const [confirmingExam, setConfirmingExam] = useState(false);
+  const [confirmingCoach, setConfirmingCoach] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -219,21 +219,20 @@ export default function AdminDashboard() {
     return beltHierarchy[currentIndex + 1];
   };
 
-  const confirmExamRegistrations = async () => {
+  const confirmCoachExamRegistrations = async (coachName: string, coachRegistrations: Registration[]) => {
     if (!registrationsView || registrationsView.type !== 'exam') return;
     
-    if (!confirm(`هل أنت متأكد من تأكيد تسجيل الاختبار "${registrationsView.periodName}"؟\nسيتم ترقية أحزمة جميع اللاعبين المسجلين.`)) {
+    if (!confirm(`هل أنت متأكد من تأكيد تسجيل الاختبار للمدرب "${coachName}"؟\nسيتم ترقية أحزمة جميع لاعبيه المسجلين.`)) {
       return;
     }
 
-    setConfirmingExam(true);
+    setConfirmingCoach(coachName);
     
     try {
-      const registrations = registrationsView.registrations;
       const playersToUpdate: { id: string; currentBelt: string; newBelt: string }[] = [];
       
-      // Collect players to update
-      for (const reg of registrations) {
+      // Collect players to update for this coach
+      for (const reg of coachRegistrations) {
         const player = reg.player;
         if (player && player.belt) {
           const newBelt = getNextBelt(player.belt);
@@ -248,8 +247,8 @@ export default function AdminDashboard() {
       }
       
       if (playersToUpdate.length === 0) {
-        alert('لا يوجد لاعبين يمكن ترقيتهم');
-        setConfirmingExam(false);
+        alert('لا يوجد لاعبين يمكن ترقيتهم لهذا المدرب');
+        setConfirmingCoach(null);
         return;
       }
       
@@ -272,7 +271,7 @@ export default function AdminDashboard() {
       }
       
       if (successCount > 0) {
-        alert(`تم ترقية ${successCount} لاعب بنجاح${errorCount > 0 ? `، فشل تحديث ${errorCount} لاعب` : ''}`);
+        alert(`تم ترقية ${successCount} لاعب بنجاح للمدرب ${coachName}${errorCount > 0 ? `، فشل تحديث ${errorCount} لاعب` : ''}`);
         
         // Refresh the registrations view to show updated data
         await viewRegistrations(
@@ -292,7 +291,7 @@ export default function AdminDashboard() {
       console.error('Error confirming exam registrations:', error);
       alert('حدث خطأ أثناء تأكيد التسجيل');
     } finally {
-      setConfirmingExam(false);
+      setConfirmingCoach(null);
     }
   };
 
@@ -543,8 +542,8 @@ export default function AdminDashboard() {
           periodName={registrationsView.periodName}
           periodType={registrationsView.type}
           onClose={() => setRegistrationsView(null)}
-          onConfirmExam={registrationsView.type === 'exam' ? confirmExamRegistrations : undefined}
-          confirmingExam={confirmingExam}
+          onConfirmCoach={registrationsView.type === 'exam' ? confirmCoachExamRegistrations : undefined}
+          confirmingCoach={confirmingCoach}
           getPeriodTitle={getPeriodTitle}
         />
       )}
@@ -590,7 +589,7 @@ function OrganizationsTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">النوع</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+          </tr>
       </thead>
       <tbody>
         {organizations.map((org) => (
@@ -638,7 +637,7 @@ function CoachesTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">المؤسسة</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+          </tr>
       </thead>
       <tbody>
         {coaches.map((coach) => (
@@ -688,7 +687,7 @@ function PlayersTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">مستوى الحزام</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الهاتف</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+          </tr>
       </thead>
       <tbody>
         {players.map((player) => (
@@ -797,22 +796,22 @@ function PeriodsTable({
   );
 }
 
-// Updated Registrations Modal with confirm button for exams
+// Updated Registrations Modal with confirm button for each coach
 function RegistrationsModal({
   registrations,
   periodName,
   periodType,
   onClose,
-  onConfirmExam,
-  confirmingExam,
+  onConfirmCoach,
+  confirmingCoach,
   getPeriodTitle,
 }: {
   registrations: any[];
   periodName: string;
   periodType: PeriodTabType;
   onClose: () => void;
-  onConfirmExam?: () => void;
-  confirmingExam?: boolean;
+  onConfirmCoach?: (coachName: string, coachRegistrations: Registration[]) => void;
+  confirmingCoach?: string | null;
   getPeriodTitle: (type: PeriodTabType) => string;
 }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -838,24 +837,12 @@ function RegistrationsModal({
           <h3 className="text-lg font-semibold text-gray-900">
             المسجلين في {periodName} ({getPeriodTitle(periodType)})
           </h3>
-          <div className="flex gap-3">
-            {periodType === 'exam' && onConfirmExam && registrations.length > 0 && (
-              <button
-                onClick={onConfirmExam}
-                disabled={confirmingExam}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50"
-              >
-                <CheckCircle className="w-4 h-4" />
-                <span>{confirmingExam ? 'جاري التأكيد...' : 'تأكيد تسجيل الاختبار الحالي'}</span>
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         <div className="p-6">
@@ -877,6 +864,10 @@ function RegistrationsModal({
           <div className="space-y-6">
             {filteredCoaches.map(([coachName, coachRegistrations]) => {
               const organizationName = coachRegistrations[0]?.coach?.organization?.name || 'لا يوجد';
+              const hasPlayersToUpgrade = coachRegistrations.some(reg => {
+                const currentBelt = reg.player?.belt;
+                return currentBelt && getNextBelt(currentBelt) && getNextBelt(currentBelt) !== currentBelt;
+              });
               
               return (
                 <div key={coachName} className="border rounded-lg overflow-hidden">
@@ -889,9 +880,21 @@ function RegistrationsModal({
                           {organizationName}
                         </p>
                       </div>
-                      <p className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full inline-block">
-                        عدد اللاعبين: {coachRegistrations.length}
-                      </p>
+                      <div className="flex items-center gap-3">
+                        <p className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full inline-block">
+                          عدد اللاعبين: {coachRegistrations.length}
+                        </p>
+                        {periodType === 'exam' && onConfirmCoach && coachRegistrations.length > 0 && hasPlayersToUpgrade && (
+                          <button
+                            onClick={() => onConfirmCoach(coachName, coachRegistrations)}
+                            disabled={confirmingCoach === coachName}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50 text-sm"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                            <span>{confirmingCoach === coachName ? 'جاري التأكيد...' : 'تأكيد تسجيل الاختبار'}</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="overflow-x-auto">
