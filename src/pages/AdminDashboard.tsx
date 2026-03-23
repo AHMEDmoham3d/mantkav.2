@@ -54,6 +54,13 @@ export default function AdminDashboard() {
     periodName: string;
     registrations: Registration[];
   } | null>(null);
+  const [editingPeriod, setEditingPeriod] = useState<{
+    id: string;
+    type: PeriodTabType;
+    name: string;
+    start_date: string;
+    end_date: string;
+  } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -127,6 +134,19 @@ export default function AdminDashboard() {
     else table = 'championship_periods';
 
     await handleDelete(id, table);
+  };
+
+  const handleEditPeriod = (period: any, type: PeriodTabType) => {
+    setEditingPeriod({
+      id: period.id,
+      type: type,
+      name: period.name,
+      start_date: period.start_date,
+      end_date: period.end_date,
+    });
+    setSelectedPeriodType(type);
+    setEditingId(period.id);
+    setShowModal(true);
   };
 
   const viewRegistrations = async (type: PeriodTabType, periodId: string, periodName: string) => {
@@ -276,6 +296,7 @@ export default function AdminDashboard() {
                   <button
                     onClick={() => {
                       setEditingId(null);
+                      setEditingPeriod(null);
                       setShowModal(true);
                     }}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
@@ -338,6 +359,7 @@ export default function AdminDashboard() {
                   <button
                     onClick={() => {
                       setEditingId(null);
+                      setEditingPeriod(null);
                       setSelectedPeriodType(
                         activeTab === 'examPeriods' ? 'exam' : 
                         activeTab === 'secondaryPeriods' ? 'secondary' : 'championship'
@@ -362,6 +384,7 @@ export default function AdminDashboard() {
                         periods={examPeriods}
                         type="exam"
                         onDelete={(id) => handleDeletePeriod(id, 'exam')}
+                        onEdit={(period) => handleEditPeriod(period, 'exam')}
                         onViewRegistrations={(id, name) => viewRegistrations('exam', id, name)}
                         getPeriodStatus={getPeriodStatus}
                       />
@@ -371,6 +394,7 @@ export default function AdminDashboard() {
                         periods={secondaryPeriods}
                         type="secondary"
                         onDelete={(id) => handleDeletePeriod(id, 'secondary')}
+                        onEdit={(period) => handleEditPeriod(period, 'secondary')}
                         onViewRegistrations={(id, name) => viewRegistrations('secondary', id, name)}
                         getPeriodStatus={getPeriodStatus}
                       />
@@ -380,6 +404,7 @@ export default function AdminDashboard() {
                         periods={championshipPeriods}
                         type="championship"
                         onDelete={(id) => handleDeletePeriod(id, 'championship')}
+                        onEdit={(period) => handleEditPeriod(period, 'championship')}
                         onViewRegistrations={(id, name) => viewRegistrations('championship', id, name)}
                         getPeriodStatus={getPeriodStatus}
                       />
@@ -407,13 +432,16 @@ export default function AdminDashboard() {
           type={activeTab === 'organizations' ? 'organizations' : activeTab === 'coaches' ? 'coaches' : activeTab === 'players' ? 'players' : 'period'}
           periodType={selectedPeriodType}
           editingId={editingId}
+          editingPeriod={editingPeriod}
           onClose={() => {
             setShowModal(false);
             setEditingId(null);
+            setEditingPeriod(null);
           }}
           onSuccess={() => {
             setShowModal(false);
             setEditingId(null);
+            setEditingPeriod(null);
             loadData();
           }}
         />
@@ -569,17 +597,19 @@ function PlayersTable({
   );
 }
 
-// New component for Periods Table
+// Updated PeriodsTable with edit button
 function PeriodsTable({
   periods,
   type,
   onDelete,
+  onEdit,
   onViewRegistrations,
   getPeriodStatus,
 }: {
   periods: any[];
   type: string;
   onDelete: (id: string) => void;
+  onEdit: (period: any) => void;
   onViewRegistrations: (id: string, name: string) => void;
   getPeriodStatus: (start: string, end: string) => { text: string; className: string };
 }) {
@@ -619,6 +649,12 @@ function PeriodsTable({
                   <span className="text-sm">عرض المسجلين</span>
                 </button>
                 <button
+                  onClick={() => onEdit(period)}
+                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button
                   onClick={() => onDelete(period.id)}
                   className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
                 >
@@ -638,7 +674,7 @@ function PeriodsTable({
   );
 }
 
-// New component for Registrations Modal
+// Registrations Modal component
 function RegistrationsModal({
   registrations,
   periodName,
@@ -711,17 +747,25 @@ function RegistrationsModal({
   );
 }
 
-// Updated FormModal to handle period creation
+// Updated FormModal to handle period editing
 function FormModal({
   type,
   periodType,
   editingId,
+  editingPeriod,
   onClose,
   onSuccess,
 }: {
   type: string;
   periodType?: 'exam' | 'secondary' | 'championship';
   editingId: string | null;
+  editingPeriod: {
+    id: string;
+    type: PeriodTabType;
+    name: string;
+    start_date: string;
+    end_date: string;
+  } | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -739,8 +783,15 @@ function FormModal({
 
     if (editingId && type !== 'period') {
       loadExistingData();
+    } else if (editingPeriod && type === 'period') {
+      // Load period data for editing
+      setFormData({
+        name: editingPeriod.name,
+        start_date: editingPeriod.start_date,
+        end_date: editingPeriod.end_date,
+      });
     }
-  }, [type, editingId]);
+  }, [type, editingId, editingPeriod]);
 
   const loadOrganizations = async () => {
     const { data } = await supabase.from('organizations').select('*').order('name');
@@ -801,10 +852,15 @@ function FormModal({
       end_date: formData.end_date,
     };
 
-    if (editingId) {
-      await supabase.from(table).update(data).eq('id', editingId);
+    // Use editingPeriod.id if available, otherwise use editingId
+    const periodId = editingPeriod?.id || editingId;
+    
+    if (periodId) {
+      const { error } = await supabase.from(table).update(data).eq('id', periodId);
+      if (error) throw error;
     } else {
-      await supabase.from(table).insert([data]);
+      const { error } = await supabase.from(table).insert([data]);
+      if (error) throw error;
     }
   };
 
@@ -866,7 +922,7 @@ function FormModal({
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b">
           <h3 className="text-lg font-semibold text-gray-900">
-            {editingId ? 'تعديل' : 'إضافة جديد'}
+            {editingId || editingPeriod ? 'تعديل' : 'إضافة جديد'}
           </h3>
           <button
             onClick={onClose}
