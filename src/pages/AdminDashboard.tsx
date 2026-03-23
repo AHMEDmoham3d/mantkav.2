@@ -13,7 +13,8 @@ import {
   Trophy,
   ClipboardList,
   Eye,
-  FileText
+  FileText,
+  Search
 } from 'lucide-react';
 
 type TabType = 'organizations' | 'coaches' | 'players' | 'examPeriods' | 'secondaryPeriods' | 'championshipPeriods';
@@ -32,6 +33,11 @@ type Registration = {
   coach?: {
     id: string;
     full_name: string;
+    organization_id: string;
+    organization?: {
+      id: string;
+      name: string;
+    };
   };
 };
 
@@ -157,21 +163,21 @@ export default function AdminDashboard() {
       table = 'exam_registrations';
       const { data } = await supabase
         .from(table)
-        .select('*, player:players(*), coach:profiles(*)')
+        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
         .eq('exam_period_id', periodId);
       registrations = data || [];
     } else if (type === 'secondary') {
       table = 'secondary_registrations';
       const { data } = await supabase
         .from(table)
-        .select('*, player:players(*), coach:profiles(*)')
+        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
         .eq('secondary_period_id', periodId);
       registrations = data || [];
     } else {
       table = 'championship_registrations';
       const { data } = await supabase
         .from(table)
-        .select('*, player:players(*), coach:profiles(*)')
+        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
         .eq('championship_period_id', periodId);
       registrations = data || [];
     }
@@ -597,7 +603,7 @@ function PlayersTable({
   );
 }
 
-// Updated PeriodsTable with edit button
+// PeriodsTable component
 function PeriodsTable({
   periods,
   type,
@@ -674,7 +680,7 @@ function PeriodsTable({
   );
 }
 
-// Registrations Modal component
+// Updated Registrations Modal with search filter and organization name
 function RegistrationsModal({
   registrations,
   periodName,
@@ -684,6 +690,8 @@ function RegistrationsModal({
   periodName: string;
   onClose: () => void;
 }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  
   // Group registrations by coach
   const groupedByCoach: Record<string, Registration[]> = registrations.reduce((acc: Record<string, Registration[]>, reg: Registration) => {
     const coachName = reg.coach?.full_name || 'مدرب غير معروف';
@@ -692,10 +700,16 @@ function RegistrationsModal({
     return acc;
   }, {});
 
+  // Filter coaches based on search term
+  const filteredCoaches = Object.entries(groupedByCoach).filter(([coachName]) => {
+    if (!searchTerm.trim()) return true;
+    return coachName.toLowerCase().includes(searchTerm.toLowerCase());
+  });
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white">
+      <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
           <h3 className="text-lg font-semibold text-gray-900">
             المسجلين في {periodName}
           </h3>
@@ -707,47 +721,79 @@ function RegistrationsModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          {Object.entries(groupedByCoach).map(([coachName, coachRegistrations]) => (
-            <div key={coachName} className="border rounded-lg overflow-hidden">
-              <div className="bg-gray-50 px-4 py-3 border-b">
-                <h4 className="font-semibold text-gray-900">المدرب: {coachName}</h4>
-                <p className="text-sm text-gray-600">عدد اللاعبين: {coachRegistrations.length}</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-2 text-right text-sm font-semibold">اللاعب</th>
-                      <th className="px-4 py-2 text-right text-sm font-semibold">تاريخ الميلاد</th>
-                      <th className="px-4 py-2 text-right text-sm font-semibold">الحزام</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {coachRegistrations.map((reg: Registration) => (
-                      <tr key={reg.id} className="border-t">
-                        <td className="px-4 py-2 text-sm">{reg.player?.full_name || reg.player_name}</td>
-                        <td className="px-4 py-2 text-sm">{reg.birth_date || reg.player?.birth_date}</td>
-                        <td className="px-4 py-2 text-sm">{reg.last_belt || reg.player?.belt}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+        <div className="p-6">
+          {/* Search Input */}
+          <div className="mb-6">
+            <div className="relative">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="ابحث عن مدرب بالاسم..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pr-12 pl-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
             </div>
-          ))}
-          {registrations.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
-              لا يوجد مسجلين في هذه الفترة
-            </div>
-          )}
+          </div>
+
+          {/* Coaches List */}
+          <div className="space-y-6">
+            {filteredCoaches.map(([coachName, coachRegistrations]) => {
+              // Get organization name from the first registration of this coach
+              const organizationName = coachRegistrations[0]?.coach?.organization?.name || 'لا يوجد';
+              
+              return (
+                <div key={coachName} className="border rounded-lg overflow-hidden">
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3 border-b">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div>
+                        <h4 className="font-semibold text-gray-900 text-lg">المدرب: {coachName}</h4>
+                        <p className="text-sm text-blue-700 mt-1">
+                          <Building2 className="w-4 h-4 inline ml-1" />
+                          {organizationName}
+                        </p>
+                      </div>
+                      <p className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full inline-block">
+                        عدد اللاعبين: {coachRegistrations.length}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">اللاعب</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الميلاد</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {coachRegistrations.map((reg: Registration) => (
+                          <tr key={reg.id} className="border-t hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm text-gray-900">{reg.player?.full_name || reg.player_name}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{reg.birth_date || reg.player?.birth_date || '-'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{reg.last_belt || reg.player?.belt || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+            {filteredCoaches.length === 0 && (
+              <div className="text-center py-12 text-gray-500">
+                {searchTerm ? 'لا يوجد مدربين مطابقين للبحث' : 'لا يوجد مسجلين في هذه الفترة'}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// Updated FormModal to handle period editing
+// FormModal component
 function FormModal({
   type,
   periodType,
@@ -784,7 +830,6 @@ function FormModal({
     if (editingId && type !== 'period') {
       loadExistingData();
     } else if (editingPeriod && type === 'period') {
-      // Load period data for editing
       setFormData({
         name: editingPeriod.name,
         start_date: editingPeriod.start_date,
@@ -852,7 +897,6 @@ function FormModal({
       end_date: formData.end_date,
     };
 
-    // Use editingPeriod.id if available, otherwise use editingId
     const periodId = editingPeriod?.id || editingId;
     
     if (periodId) {
@@ -1127,11 +1171,16 @@ function FormModal({
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="white">أبيض</option>
-                  <option value="yellow">أصفر</option>
-                  <option value="orange">برتقالي</option>
-                  <option value="green">أخضر</option>
-                  <option value="blue">أزرق</option>
-                  <option value="brown">بني</option>
+                  <option value="yellow 10">اصفر 10</option>
+                  <option value="yellow 9">اصفر 9</option>
+                  <option value="orange 8">برتقالى 8</option>
+                  <option value="orange 7">برتقالى 7</option>
+                  <option value="green 6">اخضر 6</option>
+                  <option value="green 5">اخضر 5</option>
+                  <option value="blue 4">ازرق 4</option>
+                  <option value="blue 3">ازرق 3</option>
+                  <option value="brown 2">بنى 2</option>
+                  <option value="brown 1">بنى 1</option>
                   <option value="black">أسود</option>
                 </select>
               </div>
