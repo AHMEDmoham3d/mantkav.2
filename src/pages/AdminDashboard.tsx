@@ -14,7 +14,8 @@ import {
   ClipboardList,
   Eye,
   FileText,
-  Search
+  Search,
+  CheckCircle
 } from 'lucide-react';
 
 type TabType = 'organizations' | 'coaches' | 'players' | 'examPeriods' | 'secondaryPeriods' | 'championshipPeriods';
@@ -25,7 +26,9 @@ type Registration = {
   player_name: string;
   birth_date: string | null;
   last_belt: string | null;
+  player_id?: string;
   player?: {
+    id: string;
     full_name: string;
     birth_date: string | null;
     belt: string | null;
@@ -67,6 +70,7 @@ export default function AdminDashboard() {
     start_date: string;
     end_date: string;
   } | null>(null);
+  const [confirmingExam, setConfirmingExam] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -190,6 +194,115 @@ export default function AdminDashboard() {
     if (today < startDate) return { text: 'قادم', className: 'bg-yellow-100 text-yellow-800' };
     if (today > endDate) return { text: 'منتهي', className: 'bg-gray-100 text-gray-800' };
     return { text: 'نشط', className: 'bg-green-100 text-green-800' };
+  };
+
+  const getNextBelt = (currentBelt: string): string | null => {
+    const beltHierarchy = [
+      'white',
+      'yellow 10',
+      'yellow 9',
+      'orange 8',
+      'orange 7',
+      'green 6',
+      'green 5',
+      'blue 4',
+      'blue 3',
+      'brown 2',
+      'brown 1',
+      'black'
+    ];
+
+    const currentIndex = beltHierarchy.indexOf(currentBelt);
+    if (currentIndex === -1 || currentIndex === beltHierarchy.length - 1) {
+      return null;
+    }
+    return beltHierarchy[currentIndex + 1];
+  };
+
+  const confirmExamRegistrations = async () => {
+    if (!registrationsView || registrationsView.type !== 'exam') return;
+    
+    if (!confirm(`هل أنت متأكد من تأكيد تسجيل الاختبار "${registrationsView.periodName}"؟\nسيتم ترقية أحزمة جميع اللاعبين المسجلين.`)) {
+      return;
+    }
+
+    setConfirmingExam(true);
+    
+    try {
+      const registrations = registrationsView.registrations;
+      const playersToUpdate: { id: string; currentBelt: string; newBelt: string }[] = [];
+      
+      // Collect players to update
+      for (const reg of registrations) {
+        const player = reg.player;
+        if (player && player.belt) {
+          const newBelt = getNextBelt(player.belt);
+          if (newBelt && newBelt !== player.belt) {
+            playersToUpdate.push({
+              id: player.id,
+              currentBelt: player.belt,
+              newBelt: newBelt
+            });
+          }
+        }
+      }
+      
+      if (playersToUpdate.length === 0) {
+        alert('لا يوجد لاعبين يمكن ترقيتهم');
+        setConfirmingExam(false);
+        return;
+      }
+      
+      // Update each player's belt
+      let successCount = 0;
+      let errorCount = 0;
+      
+      for (const player of playersToUpdate) {
+        const { error } = await supabase
+          .from('players')
+          .update({ belt: player.newBelt })
+          .eq('id', player.id);
+        
+        if (error) {
+          console.error(`Error updating player ${player.id}:`, error);
+          errorCount++;
+        } else {
+          successCount++;
+        }
+      }
+      
+      if (successCount > 0) {
+        alert(`تم ترقية ${successCount} لاعب بنجاح${errorCount > 0 ? `، فشل تحديث ${errorCount} لاعب` : ''}`);
+        
+        // Refresh the registrations view to show updated data
+        await viewRegistrations(
+          registrationsView.type,
+          registrationsView.periodId,
+          registrationsView.periodName
+        );
+        
+        // Reload players list if on players tab
+        if (activeTab === 'players') {
+          loadData();
+        }
+      } else {
+        alert('فشل تحديث بيانات اللاعبين');
+      }
+    } catch (error) {
+      console.error('Error confirming exam registrations:', error);
+      alert('حدث خطأ أثناء تأكيد التسجيل');
+    } finally {
+      setConfirmingExam(false);
+    }
+  };
+
+  const getPeriodTitle = (type: PeriodTabType) => {
+    switch (type) {
+      case 'exam': return 'فترة اختبار';
+      case 'secondary': return 'فترة تسجيل ثانوي';
+      case 'championship': return 'فترة بطولة';
+      default: return '';
+    }
   };
 
   return (
@@ -428,7 +541,11 @@ export default function AdminDashboard() {
         <RegistrationsModal
           registrations={registrationsView.registrations}
           periodName={registrationsView.periodName}
+          periodType={registrationsView.type}
           onClose={() => setRegistrationsView(null)}
+          onConfirmExam={registrationsView.type === 'exam' ? confirmExamRegistrations : undefined}
+          confirmingExam={confirmingExam}
+          getPeriodTitle={getPeriodTitle}
         />
       )}
 
@@ -680,15 +797,23 @@ function PeriodsTable({
   );
 }
 
-// Updated Registrations Modal with search filter and organization name
+// Updated Registrations Modal with confirm button for exams
 function RegistrationsModal({
   registrations,
   periodName,
+  periodType,
   onClose,
+  onConfirmExam,
+  confirmingExam,
+  getPeriodTitle,
 }: {
   registrations: any[];
   periodName: string;
+  periodType: PeriodTabType;
   onClose: () => void;
+  onConfirmExam?: () => void;
+  confirmingExam?: boolean;
+  getPeriodTitle: (type: PeriodTabType) => string;
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -711,14 +836,26 @@ function RegistrationsModal({
       <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
           <h3 className="text-lg font-semibold text-gray-900">
-            المسجلين في {periodName}
+            المسجلين في {periodName} ({getPeriodTitle(periodType)})
           </h3>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex gap-3">
+            {periodType === 'exam' && onConfirmExam && registrations.length > 0 && (
+              <button
+                onClick={onConfirmExam}
+                disabled={confirmingExam}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50"
+              >
+                <CheckCircle className="w-4 h-4" />
+                <span>{confirmingExam ? 'جاري التأكيد...' : 'تأكيد تسجيل الاختبار الحالي'}</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-lg transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="p-6">
@@ -739,7 +876,6 @@ function RegistrationsModal({
           {/* Coaches List */}
           <div className="space-y-6">
             {filteredCoaches.map(([coachName, coachRegistrations]) => {
-              // Get organization name from the first registration of this coach
               const organizationName = coachRegistrations[0]?.coach?.organization?.name || 'لا يوجد';
               
               return (
@@ -764,17 +900,30 @@ function RegistrationsModal({
                         <tr>
                           <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">اللاعب</th>
                           <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الميلاد</th>
-                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام الحالي</th>
+                          {periodType === 'exam' && (
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام بعد الترقية</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody>
-                        {coachRegistrations.map((reg: Registration) => (
-                          <tr key={reg.id} className="border-t hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm text-gray-900">{reg.player?.full_name || reg.player_name}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{reg.birth_date || reg.player?.birth_date || '-'}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{reg.last_belt || reg.player?.belt || '-'}</td>
-                          </tr>
-                        ))}
+                        {coachRegistrations.map((reg: Registration) => {
+                          const currentBelt = reg.player?.belt || reg.last_belt || '-';
+                          const nextBelt = periodType === 'exam' ? getNextBelt(currentBelt) : null;
+                          
+                          return (
+                            <tr key={reg.id} className="border-t hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm text-gray-900">{reg.player?.full_name || reg.player_name}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{reg.birth_date || reg.player?.birth_date || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{currentBelt}</td>
+                              {periodType === 'exam' && (
+                                <td className="px-4 py-3 text-sm font-semibold text-green-600">
+                                  {nextBelt ? nextBelt : 'الحد الأقصى'}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -791,6 +940,30 @@ function RegistrationsModal({
       </div>
     </div>
   );
+}
+
+// Helper function to get next belt
+function getNextBelt(currentBelt: string): string | null {
+  const beltHierarchy = [
+    'white',
+    'yellow 10',
+    'yellow 9',
+    'orange 8',
+    'orange 7',
+    'green 6',
+    'green 5',
+    'blue 4',
+    'blue 3',
+    'brown 2',
+    'brown 1',
+    'black'
+  ];
+
+  const currentIndex = beltHierarchy.indexOf(currentBelt);
+  if (currentIndex === -1 || currentIndex === beltHierarchy.length - 1) {
+    return null;
+  }
+  return beltHierarchy[currentIndex + 1];
 }
 
 // FormModal component
