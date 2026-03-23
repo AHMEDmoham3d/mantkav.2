@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+/* Professional light theme */
+.bg-gray-50 { background-color: #f8fafc; }
+.bg-white { background-color: #ffffff; border-color: #e2e8f0; }
+.text-gray-900 { color: #1e293b; }
+.text-gray-600 { color: #64748b; }
+.text-gray-700 { color: #475569; }
+.border-gray-200 { border-color: #e2e8f0; }
+.border-gray-300 { border-color: #cbd5e1; }
+.hover\:bg-gray-50:hover { background-color: #f1f5f9; }
+.hover\:bg-gray-100:hover { background-color: #f8fafc; }
+.shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+.shadow-xl { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+
+/* Professional button styles */
+.bg-blue-600 { background-color: #2563eb; }
+.hover\:bg-blue-700:hover { background-color: #1d4ed8; }
+.bg-red-600 { background-color: #dc2626; }
+.hover\:bg-red-700:hover { background-color: #b91c1c; }
+.bg-green-600 { background-color: #16a34a; }
+.hover\:bg-green-700:hover { background-color: #15803d; }
+.bg-amber-600 { background-color: #d97706; }
+.hover\:bg-amber-700:hover { background-color: #b45309; }
+.bg-purple-600 { background-color: #9333ea; }
+.hover\:bg-purple-700:hover { background-color: #7c3aed; }
+
+/* Focus styles */
+.focus\:ring-blue-500:focus { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5); }
+
+/* Table styles */
+.border-b { border-color: #e2e8f0; }
