@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, Organization, Coach, Player, ExamPeriod, SecondaryRegistrationPeriod, ChampionshipPeriod } from '../lib/supabase';
+import { supabase, Organization, Coach, Player } from '../lib/supabase';
 import {
   LogOut,
   Building2,
@@ -10,39 +10,55 @@ import {
   Trash2,
   Edit2,
   X,
+  Calendar,
   Trophy,
-  ClipboardList,
+  BookOpen,
   Eye,
-  FileText,
   Search,
-  CheckCircle
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
-type TabType = 'organizations' | 'coaches' | 'players' | 'examPeriods' | 'secondaryPeriods' | 'championshipPeriods';
-type PeriodTabType = 'exam' | 'secondary' | 'championship';
+type TabType = 'organizations' | 'coaches' | 'players' | 'examPeriods' | 'secondaryPeriods' | 'championshipPeriods' | 'viewRegistrations';
 
-type Registration = {
+// Interfaces for the periods
+interface ExamPeriod {
   id: string;
-  player_name: string;
-  birth_date: string | null;
-  last_belt: string | null;
-  player_id?: string;
-  player?: {
+  name: string;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+}
+
+interface SecondaryPeriod {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+}
+
+interface ChampionshipPeriod {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+}
+
+// Interface for grouped registrations
+interface CoachRegistrationGroup {
+  coachId: string;
+  coachName: string;
+  coachEmail?: string;
+  organizationName: string;
+  players: {
     id: string;
-    full_name: string;
-    birth_date: string | null;
-    belt: string | null;
-  };
-  coach?: {
-    id: string;
-    full_name: string;
-    organization_id: string;
-    organization?: {
-      id: string;
-      name: string;
-    };
-  };
-};
+    name: string;
+    birth_date: string;
+    belt_level: string;
+  }[];
+}
 
 export default function AdminDashboard() {
   const { signOut } = useAuth();
@@ -51,29 +67,29 @@ export default function AdminDashboard() {
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [examPeriods, setExamPeriods] = useState<ExamPeriod[]>([]);
-  const [secondaryPeriods, setSecondaryPeriods] = useState<SecondaryRegistrationPeriod[]>([]);
+  const [secondaryPeriods, setSecondaryPeriods] = useState<SecondaryPeriod[]>([]);
   const [championshipPeriods, setChampionshipPeriods] = useState<ChampionshipPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [selectedPeriodType, setSelectedPeriodType] = useState<PeriodTabType>('exam');
-  const [registrationsView, setRegistrationsView] = useState<{
-    type: PeriodTabType;
-    periodId: string;
-    periodName: string;
-    registrations: Registration[];
-  } | null>(null);
-  const [editingPeriod, setEditingPeriod] = useState<{
-    id: string;
-    type: PeriodTabType;
-    name: string;
-    start_date: string;
-    end_date: string;
-  } | null>(null);
-  const [confirmingExam, setConfirmingExam] = useState(false);
+  
+  // State for viewing registrations
+  const [selectedPeriodType, setSelectedPeriodType] = useState<'exam' | 'secondary' | 'championship'>('exam');
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string>('');
+  const [registrationsGroups, setRegistrationsGroups] = useState<CoachRegistrationGroup[]>([]);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [searchCoachTerm, setSearchCoachTerm] = useState('');
+  const [expandedCoaches, setExpandedCoaches] = useState<Set<string>>(new Set());
+  const [periodsForDropdown, setPeriodsForDropdown] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'viewRegistrations') {
+      loadPeriodsForDropdown();
+    }
   }, [activeTab]);
 
   const loadData = async () => {
@@ -102,19 +118,19 @@ export default function AdminDashboard() {
         const { data } = await supabase
           .from('exam_periods')
           .select('*')
-          .order('start_date', { ascending: false });
+          .order('created_at', { ascending: false });
         setExamPeriods(data || []);
       } else if (activeTab === 'secondaryPeriods') {
         const { data } = await supabase
           .from('secondary_registration_periods')
           .select('*')
-          .order('start_date', { ascending: false });
+          .order('created_at', { ascending: false });
         setSecondaryPeriods(data || []);
       } else if (activeTab === 'championshipPeriods') {
         const { data } = await supabase
-          .from('championship_periods')
+          .from('tournament_periods')
           .select('*')
-          .order('start_date', { ascending: false });
+          .order('created_at', { ascending: false });
         setChampionshipPeriods(data || []);
       }
     } catch (error) {
@@ -123,6 +139,118 @@ export default function AdminDashboard() {
       setLoading(false);
     }
   };
+
+  const loadPeriodsForDropdown = async () => {
+    try {
+      let data;
+      if (selectedPeriodType === 'exam') {
+        const { data: examData } = await supabase
+          .from('exam_periods')
+          .select('id, name, start_date, end_date')
+          .order('created_at', { ascending: false });
+        data = examData;
+      } else if (selectedPeriodType === 'secondary') {
+        const { data: secondaryData } = await supabase
+          .from('secondary_registration_periods')
+          .select('id, name, start_date, end_date')
+          .order('created_at', { ascending: false });
+        data = secondaryData;
+      } else {
+        const { data: champData } = await supabase
+          .from('tournament_periods')
+          .select('id, name, start_date, end_date')
+          .order('created_at', { ascending: false });
+        data = champData;
+      }
+      setPeriodsForDropdown(data || []);
+      if (data && data.length > 0 && !selectedPeriodId) {
+        setSelectedPeriodId(data[0].id);
+      }
+    } catch (error) {
+      console.error('Error loading periods:', error);
+    }
+  };
+
+  const loadRegistrations = async () => {
+    if (!selectedPeriodId) {
+      alert('الرجاء اختيار فترة أولاً');
+      return;
+    }
+
+    setViewLoading(true);
+    try {
+      let registrations: any[] = [];
+      
+      if (selectedPeriodType === 'exam') {
+        const { data } = await supabase
+          .from('exam_registrations')
+          .select(`
+            *,
+            coach:coach_id (id, full_name, email, organization:organization_id (name))
+          `)
+          .eq('exam_period_id', selectedPeriodId);
+        registrations = data || [];
+      } else if (selectedPeriodType === 'secondary') {
+        const { data } = await supabase
+          .from('secondary_registrations')
+          .select(`
+            *,
+            coach:coach_id (id, full_name, email, organization:organization_id (name))
+          `)
+          .eq('secondary_period_id', selectedPeriodId);
+        registrations = data || [];
+      } else {
+        const { data } = await supabase
+          .from('tournament_registrations')
+          .select(`
+            *,
+            coach:coach_id (id, full_name, email, organization:organization_id (name))
+          `)
+          .eq('tournament_period_id', selectedPeriodId);
+        registrations = data || [];
+      }
+
+      // Group by coach
+      const groupsMap = new Map<string, CoachRegistrationGroup>();
+      
+      registrations.forEach(reg => {
+        const coachData = reg.coach;
+        if (!coachData) return;
+        
+        const coachId = coachData.id;
+        if (!groupsMap.has(coachId)) {
+          groupsMap.set(coachId, {
+            coachId: coachId,
+            coachName: coachData.full_name,
+            coachEmail: coachData.email,
+            organizationName: coachData.organization?.name || 'غير محدد',
+            players: []
+          });
+        }
+        
+        groupsMap.get(coachId)!.players.push({
+          id: reg.player_id,
+          name: reg.player_name,
+          birth_date: reg.birth_date || '',
+          belt_level: reg.last_belt || ''
+        });
+      });
+      
+      setRegistrationsGroups(Array.from(groupsMap.values()));
+      setExpandedCoaches(new Set());
+    } catch (error) {
+      console.error('Error loading registrations:', error);
+      alert('حدث خطأ أثناء تحميل البيانات');
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'viewRegistrations' && selectedPeriodId) {
+      loadRegistrations();
+    }
+  }, [selectedPeriodId, selectedPeriodType, activeTab]);
 
   const handleDelete = async (id: string, table: string) => {
     if (!confirm('هل أنت متأكد من الحذف؟')) return;
@@ -137,173 +265,23 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDeletePeriod = async (id: string, type: PeriodTabType) => {
-    let table = '';
-    if (type === 'exam') table = 'exam_periods';
-    else if (type === 'secondary') table = 'secondary_registration_periods';
-    else table = 'championship_periods';
-
-    await handleDelete(id, table);
-  };
-
-  const handleEditPeriod = (period: any, type: PeriodTabType) => {
-    setEditingPeriod({
-      id: period.id,
-      type: type,
-      name: period.name,
-      start_date: period.start_date,
-      end_date: period.end_date,
-    });
-    setSelectedPeriodType(type);
-    setEditingId(period.id);
-    setShowModal(true);
-  };
-
-  const viewRegistrations = async (type: PeriodTabType, periodId: string, periodName: string) => {
-    let registrations = [];
-    let table = '';
-
-    if (type === 'exam') {
-      table = 'exam_registrations';
-      const { data } = await supabase
-        .from(table)
-        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
-        .eq('exam_period_id', periodId);
-      registrations = data || [];
-    } else if (type === 'secondary') {
-      table = 'secondary_registrations';
-      const { data } = await supabase
-        .from(table)
-        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
-        .eq('secondary_period_id', periodId);
-      registrations = data || [];
-    } else {
-      table = 'championship_registrations';
-      const { data } = await supabase
-        .from(table)
-        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
-        .eq('championship_period_id', periodId);
-      registrations = data || [];
-    }
-
-    setRegistrationsView({ type, periodId, periodName, registrations });
-  };
-
-  const getPeriodStatus = (startDate: string, endDate: string) => {
-    const today = new Date().toISOString().split('T')[0];
-    if (today < startDate) return { text: 'قادم', className: 'bg-yellow-100 text-yellow-800' };
-    if (today > endDate) return { text: 'منتهي', className: 'bg-gray-100 text-gray-800' };
-    return { text: 'نشط', className: 'bg-green-100 text-green-800' };
-  };
-
-  const getNextBelt = (currentBelt: string): string | null => {
-    const beltHierarchy = [
-      'white',
-      'yellow 10',
-      'yellow 9',
-      'orange 8',
-      'orange 7',
-      'green 6',
-      'green 5',
-      'blue 4',
-      'blue 3',
-      'brown 2',
-      'brown 1',
-      'black'
-    ];
-
-    const currentIndex = beltHierarchy.indexOf(currentBelt);
-    if (currentIndex === -1 || currentIndex === beltHierarchy.length - 1) {
-      return null;
-    }
-    return beltHierarchy[currentIndex + 1];
-  };
-
-  const confirmExamRegistrations = async () => {
-    if (!registrationsView || registrationsView.type !== 'exam') return;
-    
-    if (!confirm(`هل أنت متأكد من تأكيد تسجيل الاختبار "${registrationsView.periodName}"؟\nسيتم ترقية أحزمة جميع اللاعبين المسجلين.`)) {
-      return;
-    }
-
-    setConfirmingExam(true);
-    
-    try {
-      const registrations = registrationsView.registrations;
-      const playersToUpdate: { id: string; currentBelt: string; newBelt: string }[] = [];
-      
-      // Collect players to update
-      for (const reg of registrations) {
-        const player = reg.player;
-        if (player && player.belt) {
-          const newBelt = getNextBelt(player.belt);
-          if (newBelt && newBelt !== player.belt) {
-            playersToUpdate.push({
-              id: player.id,
-              currentBelt: player.belt,
-              newBelt: newBelt
-            });
-          }
-        }
-      }
-      
-      if (playersToUpdate.length === 0) {
-        alert('لا يوجد لاعبين يمكن ترقيتهم');
-        setConfirmingExam(false);
-        return;
-      }
-      
-      // Update each player's belt
-      let successCount = 0;
-      let errorCount = 0;
-      
-      for (const player of playersToUpdate) {
-        const { error } = await supabase
-          .from('players')
-          .update({ belt: player.newBelt })
-          .eq('id', player.id);
-        
-        if (error) {
-          console.error(`Error updating player ${player.id}:`, error);
-          errorCount++;
-        } else {
-          successCount++;
-        }
-      }
-      
-      if (successCount > 0) {
-        alert(`تم ترقية ${successCount} لاعب بنجاح${errorCount > 0 ? `، فشل تحديث ${errorCount} لاعب` : ''}`);
-        
-        // Refresh the registrations view to show updated data
-        await viewRegistrations(
-          registrationsView.type,
-          registrationsView.periodId,
-          registrationsView.periodName
-        );
-        
-        // Reload players list if on players tab
-        if (activeTab === 'players') {
-          loadData();
-        }
+  const toggleCoachExpand = (coachId: string) => {
+    setExpandedCoaches(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(coachId)) {
+        newSet.delete(coachId);
       } else {
-        alert('فشل تحديث بيانات اللاعبين');
+        newSet.add(coachId);
       }
-    } catch (error) {
-      console.error('Error confirming exam registrations:', error);
-      alert('حدث خطأ أثناء تأكيد التسجيل');
-    } finally {
-      setConfirmingExam(false);
-    }
+      return newSet;
+    });
   };
 
-  const getPeriodTitle = (type: PeriodTabType) => {
-    switch (type) {
-      case 'exam': return 'فترة اختبار';
-      case 'secondary': return 'فترة تسجيل ثانوي';
-      case 'championship': return 'فترة بطولة';
-      default: return '';
-    }
-  };
+  const filteredCoachGroups = registrationsGroups.filter(group =>
+    group.coachName.toLowerCase().includes(searchCoachTerm.toLowerCase()) ||
+    group.organizationName.toLowerCase().includes(searchCoachTerm.toLowerCase()) ||
+    (group.coachEmail && group.coachEmail.toLowerCase().includes(searchCoachTerm.toLowerCase()))
+  );
 
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
@@ -374,7 +352,7 @@ export default function AdminDashboard() {
                     : 'border-transparent text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <ClipboardList className="w-5 h-5" />
+                <Calendar className="w-5 h-5" />
                 <span>فترات الاختبارات</span>
               </button>
               <button
@@ -385,7 +363,7 @@ export default function AdminDashboard() {
                     : 'border-transparent text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <FileText className="w-5 h-5" />
+                <BookOpen className="w-5 h-5" />
                 <span>التسجيل الثانوي</span>
               </button>
               <button
@@ -399,23 +377,36 @@ export default function AdminDashboard() {
                 <Trophy className="w-5 h-5" />
                 <span>البطولات</span>
               </button>
+              <button
+                onClick={() => setActiveTab('viewRegistrations')}
+                className={`flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 transition whitespace-nowrap ${
+                  activeTab === 'viewRegistrations'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Eye className="w-5 h-5" />
+                <span>عرض المسجلين</span>
+              </button>
             </nav>
           </div>
 
           <div className="p-6">
-            {/* Basic Tables for Organizations, Coaches, Players */}
-            {(activeTab === 'organizations' || activeTab === 'coaches' || activeTab === 'players') && (
-              <>
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    {activeTab === 'organizations' && 'النوادي ومراكز الشباب'}
-                    {activeTab === 'coaches' && 'المدربين'}
-                    {activeTab === 'players' && 'اللاعبين'}
-                  </h2>
+            {activeTab !== 'viewRegistrations' && (
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-semibold text-gray-900">
+                  {activeTab === 'organizations' && 'النوادي ومراكز الشباب'}
+                  {activeTab === 'coaches' && 'المدربين'}
+                  {activeTab === 'players' && 'اللاعبين'}
+                  {activeTab === 'examPeriods' && 'فترات الاختبارات'}
+                  {activeTab === 'secondaryPeriods' && 'فترات التسجيل الثانوي'}
+                  {activeTab === 'championshipPeriods' && 'فترات البطولات'}
+                </h2>
+                {(activeTab === 'organizations' || activeTab === 'coaches' || activeTab === 'players' || 
+                  activeTab === 'examPeriods' || activeTab === 'secondaryPeriods' || activeTab === 'championshipPeriods') && (
                   <button
                     onClick={() => {
                       setEditingId(null);
-                      setEditingPeriod(null);
                       setShowModal(true);
                     }}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
@@ -423,148 +414,218 @@ export default function AdminDashboard() {
                     <Plus className="w-4 h-4" />
                     <span>إضافة جديد</span>
                   </button>
-                </div>
-
-                {loading ? (
-                  <div className="text-center py-12">
-                    <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    {activeTab === 'organizations' && (
-                      <OrganizationsTable
-                        organizations={organizations}
-                        onDelete={(id) => handleDelete(id, 'organizations')}
-                        onEdit={(id) => {
-                          setEditingId(id);
-                          setShowModal(true);
-                        }}
-                      />
-                    )}
-                    {activeTab === 'coaches' && (
-                      <CoachesTable
-                        coaches={coaches}
-                        onDelete={(id) => handleDelete(id, 'profiles')}
-                        onEdit={(id) => {
-                          setEditingId(id);
-                          setShowModal(true);
-                        }}
-                      />
-                    )}
-                    {activeTab === 'players' && (
-                      <PlayersTable
-                        players={players}
-                        onDelete={(id) => handleDelete(id, 'players')}
-                        onEdit={(id) => {
-                          setEditingId(id);
-                          setShowModal(true);
-                        }}
-                      />
-                    )}
-                  </div>
                 )}
-              </>
+              </div>
             )}
 
-            {/* Period Management Tabs */}
-            {(activeTab === 'examPeriods' || activeTab === 'secondaryPeriods' || activeTab === 'championshipPeriods') && (
-              <>
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    {activeTab === 'examPeriods' && 'إدارة فترات الاختبارات'}
-                    {activeTab === 'secondaryPeriods' && 'إدارة فترات التسجيل الثانوي'}
-                    {activeTab === 'championshipPeriods' && 'إدارة فترات البطولات'}
-                  </h2>
-                  <button
-                    onClick={() => {
-                      setEditingId(null);
-                      setEditingPeriod(null);
-                      setSelectedPeriodType(
-                        activeTab === 'examPeriods' ? 'exam' : 
-                        activeTab === 'secondaryPeriods' ? 'secondary' : 'championship'
-                      );
+            {loading && activeTab !== 'viewRegistrations' ? (
+              <div className="text-center py-12">
+                <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                {activeTab === 'organizations' && (
+                  <OrganizationsTable
+                    organizations={organizations}
+                    onDelete={(id) => handleDelete(id, 'organizations')}
+                    onEdit={(id) => {
+                      setEditingId(id);
                       setShowModal(true);
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>إضافة فترة جديدة</span>
-                  </button>
-                </div>
+                  />
+                )}
+                {activeTab === 'coaches' && (
+                  <CoachesTable
+                    coaches={coaches}
+                    onDelete={(id) => handleDelete(id, 'profiles')}
+                    onEdit={(id) => {
+                      setEditingId(id);
+                      setShowModal(true);
+                    }}
+                  />
+                )}
+                {activeTab === 'players' && (
+                  <PlayersTable
+                    players={players}
+                    onDelete={(id) => handleDelete(id, 'players')}
+                    onEdit={(id) => {
+                      setEditingId(id);
+                      setShowModal(true);
+                    }}
+                  />
+                )}
+                {activeTab === 'examPeriods' && (
+                  <PeriodsTable
+                    periods={examPeriods}
+                    type="exam"
+                    onDelete={(id) => handleDelete(id, 'exam_periods')}
+                    onEdit={(id) => {
+                      setEditingId(id);
+                      setShowModal(true);
+                    }}
+                  />
+                )}
+                {activeTab === 'secondaryPeriods' && (
+                  <PeriodsTable
+                    periods={secondaryPeriods}
+                    type="secondary"
+                    onDelete={(id) => handleDelete(id, 'secondary_registration_periods')}
+                    onEdit={(id) => {
+                      setEditingId(id);
+                      setShowModal(true);
+                    }}
+                  />
+                )}
+                {activeTab === 'championshipPeriods' && (
+                  <PeriodsTable
+                    periods={championshipPeriods}
+                    type="championship"
+                    onDelete={(id) => handleDelete(id, 'tournament_periods')}
+                    onEdit={(id) => {
+                      setEditingId(id);
+                      setShowModal(true);
+                    }}
+                  />
+                )}
+                {activeTab === 'viewRegistrations' && (
+                  <div className="space-y-6">
+                    <div className="bg-gray-50 p-4 rounded-lg flex flex-col md:flex-row gap-4 items-end">
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">نوع التسجيل</label>
+                        <select
+                          value={selectedPeriodType}
+                          onChange={(e) => {
+                            setSelectedPeriodType(e.target.value as any);
+                            setSelectedPeriodId('');
+                            setRegistrationsGroups([]);
+                          }}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="exam">اختبارات</option>
+                          <option value="secondary">تسجيل ثانوي</option>
+                          <option value="championship">بطولات</option>
+                        </select>
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">اختر الفترة</label>
+                        <select
+                          value={selectedPeriodId}
+                          onChange={(e) => setSelectedPeriodId(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">اختر فترة</option>
+                          {periodsForDropdown.map(period => (
+                            <option key={period.id} value={period.id}>
+                              {period.name} ({new Date(period.start_date).toLocaleDateString('ar-EG')} - {new Date(period.end_date).toLocaleDateString('ar-EG')})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={loadRegistrations}
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+                      >
+                        عرض
+                      </button>
+                    </div>
 
-                {loading ? (
-                  <div className="text-center py-12">
-                    <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {activeTab === 'examPeriods' && (
-                      <PeriodsTable
-                        periods={examPeriods}
-                        type="exam"
-                        onDelete={(id) => handleDeletePeriod(id, 'exam')}
-                        onEdit={(period) => handleEditPeriod(period, 'exam')}
-                        onViewRegistrations={(id, name) => viewRegistrations('exam', id, name)}
-                        getPeriodStatus={getPeriodStatus}
-                      />
-                    )}
-                    {activeTab === 'secondaryPeriods' && (
-                      <PeriodsTable
-                        periods={secondaryPeriods}
-                        type="secondary"
-                        onDelete={(id) => handleDeletePeriod(id, 'secondary')}
-                        onEdit={(period) => handleEditPeriod(period, 'secondary')}
-                        onViewRegistrations={(id, name) => viewRegistrations('secondary', id, name)}
-                        getPeriodStatus={getPeriodStatus}
-                      />
-                    )}
-                    {activeTab === 'championshipPeriods' && (
-                      <PeriodsTable
-                        periods={championshipPeriods}
-                        type="championship"
-                        onDelete={(id) => handleDeletePeriod(id, 'championship')}
-                        onEdit={(period) => handleEditPeriod(period, 'championship')}
-                        onViewRegistrations={(id, name) => viewRegistrations('championship', id, name)}
-                        getPeriodStatus={getPeriodStatus}
-                      />
+                    {viewLoading ? (
+                      <div className="text-center py-12">
+                        <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                      </div>
+                    ) : registrationsGroups.length > 0 ? (
+                      <>
+                        <div className="mb-4">
+                          <div className="relative">
+                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                            <input
+                              type="text"
+                              placeholder="ابحث باسم المدرب أو المؤسسة أو البريد الإلكتروني..."
+                              value={searchCoachTerm}
+                              onChange={(e) => setSearchCoachTerm(e.target.value)}
+                              className="w-full pr-10 pl-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-6">
+                          {filteredCoachGroups.map(group => (
+                            <div key={group.coachId} className="border rounded-lg overflow-hidden">
+                              <button
+                                onClick={() => toggleCoachExpand(group.coachId)}
+                                className="w-full bg-gray-50 p-4 flex justify-between items-center hover:bg-gray-100 transition"
+                              >
+                                <div className="text-right">
+                                  <div className="font-semibold text-lg">{group.coachName}</div>
+                                  <div className="text-sm text-gray-600">{group.organizationName}</div>
+                                  {group.coachEmail && (
+                                    <div className="text-sm text-gray-500">{group.coachEmail}</div>
+                                  )}
+                                  <div className="text-sm text-blue-600 mt-1">عدد اللاعبين: {group.players.length}</div>
+                                </div>
+                                {expandedCoaches.has(group.coachId) ? (
+                                  <ChevronUp className="w-5 h-5 text-gray-500" />
+                                ) : (
+                                  <ChevronDown className="w-5 h-5 text-gray-500" />
+                                )}
+                              </button>
+                              
+                              {expandedCoaches.has(group.coachId) && (
+                                <div className="p-4 overflow-x-auto">
+                                  <table className="w-full">
+                                    <thead>
+                                      <tr className="border-b bg-gray-50">
+                                        <th className="px-4 py-2 text-right text-sm font-semibold">اللاعب</th>
+                                        <th className="px-4 py-2 text-right text-sm font-semibold">تاريخ الميلاد</th>
+                                        <th className="px-4 py-2 text-right text-sm font-semibold">الحزام</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {group.players.map(player => (
+                                        <tr key={player.id} className="border-b">
+                                          <td className="px-4 py-2 text-sm">{player.name}</td>
+                                          <td className="px-4 py-2 text-sm">{player.birth_date ? new Date(player.birth_date).toLocaleDateString('ar-EG') : '-'}</td>
+                                          <td className="px-4 py-2 text-sm">{player.belt_level}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          
+                          {filteredCoachGroups.length === 0 && (
+                            <div className="text-center py-12 text-gray-500">
+                              لا توجد نتائج مطابقة للبحث
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-center py-12 text-gray-500">
+                        {selectedPeriodId ? 'لا يوجد لاعبين مسجلين في هذه الفترة' : 'الرجاء اختيار فترة لعرض المسجلين'}
+                      </div>
                     )}
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Registrations View Modal */}
-      {registrationsView && (
-        <RegistrationsModal
-          registrations={registrationsView.registrations}
-          periodName={registrationsView.periodName}
-          periodType={registrationsView.type}
-          onClose={() => setRegistrationsView(null)}
-          onConfirmExam={registrationsView.type === 'exam' ? confirmExamRegistrations : undefined}
-          confirmingExam={confirmingExam}
-          getPeriodTitle={getPeriodTitle}
-        />
-      )}
-
-      {/* Form Modal */}
       {showModal && (
         <FormModal
-          type={activeTab === 'organizations' ? 'organizations' : activeTab === 'coaches' ? 'coaches' : activeTab === 'players' ? 'players' : 'period'}
-          periodType={selectedPeriodType}
+          type={activeTab}
           editingId={editingId}
-          editingPeriod={editingPeriod}
           onClose={() => {
             setShowModal(false);
             setEditingId(null);
-            setEditingPeriod(null);
           }}
           onSuccess={() => {
             setShowModal(false);
             setEditingId(null);
-            setEditingPeriod(null);
             loadData();
           }}
         />
@@ -573,7 +634,6 @@ export default function AdminDashboard() {
   );
 }
 
-// Existing table components (OrganizationsTable, CoachesTable, PlayersTable) remain the same
 function OrganizationsTable({
   organizations,
   onDelete,
@@ -636,14 +696,16 @@ function CoachesTable({
       <thead>
         <tr className="border-b bg-gray-50">
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">البريد الإلكتروني</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">المؤسسة</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+        </tr>
       </thead>
       <tbody>
         {coaches.map((coach) => (
           <tr key={coach.id} className="border-b hover:bg-gray-50">
             <td className="px-6 py-4 text-sm text-gray-900">{coach.full_name}</td>
+            <td className="px-6 py-4 text-sm text-gray-600">{coach.email}</td>
             <td className="px-6 py-4 text-sm text-gray-600">
               {coach.organization?.name}
             </td>
@@ -688,7 +750,7 @@ function PlayersTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">مستوى الحزام</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الهاتف</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+        </tr>
       </thead>
       <tbody>
         {players.map((player) => (
@@ -696,7 +758,7 @@ function PlayersTable({
             <td className="px-6 py-4 text-sm text-gray-900">{player.full_name}</td>
             <td className="px-6 py-4 text-sm text-gray-600">{player.coach?.full_name}</td>
             <td className="px-6 py-4 text-sm text-gray-600">{player.belt}</td>
-            <td className="px-6 py-4 text-sm text-gray-600">{player.phone}</td>
+            <td className="px-6 py-4 text-sm text-gray-600">{player.phone || '-'}</td>
             <td className="px-6 py-4">
               <div className="flex gap-2">
                 <button
@@ -720,59 +782,42 @@ function PlayersTable({
   );
 }
 
-// PeriodsTable component
 function PeriodsTable({
   periods,
-  type,
+  type: _type,
   onDelete,
   onEdit,
-  onViewRegistrations,
-  getPeriodStatus,
 }: {
   periods: any[];
   type: string;
   onDelete: (id: string) => void;
-  onEdit: (period: any) => void;
-  onViewRegistrations: (id: string, name: string) => void;
-  getPeriodStatus: (start: string, end: string) => { text: string; className: string };
+  onEdit: (id: string) => void;
 }) {
-  const typeLabels = {
-    exam: { name: 'الاختبارات', period: 'فترة اختبار' },
-    secondary: { name: 'التسجيل الثانوي', period: 'فترة تسجيل ثانوي' },
-    championship: { name: 'البطولات', period: 'فترة بطولة' },
-  };
-
-  const label = typeLabels[type as keyof typeof typeLabels] || { name: '', period: '' };
 
   return (
-    <div className="space-y-3">
-      {periods.map((period) => {
-        const status = getPeriodStatus(period.start_date, period.end_date);
-        return (
-          <div key={period.id} className="border rounded-lg p-4 hover:shadow-md transition">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
-                  <h3 className="text-lg font-semibold text-gray-900">{period.name}</h3>
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${status.className}`}>
-                    {status.text}
-                  </span>
-                </div>
-                <div className="flex gap-4 text-sm text-gray-600">
-                  <span>من: {new Date(period.start_date).toLocaleDateString('ar-EG')}</span>
-                  <span>إلى: {new Date(period.end_date).toLocaleDateString('ar-EG')}</span>
-                </div>
-              </div>
+    <table className="w-full">
+      <thead>
+        <tr className="border-b bg-gray-50">
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ البدء</th>
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الانتهاء</th>
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
+        </tr>
+      </thead>
+      <tbody>
+        {periods.map((period) => (
+          <tr key={period.id} className="border-b hover:bg-gray-50">
+            <td className="px-6 py-4 text-sm text-gray-900">{period.name}</td>
+            <td className="px-6 py-4 text-sm text-gray-600">
+              {new Date(period.start_date).toLocaleDateString('ar-EG')}
+            </td>
+            <td className="px-6 py-4 text-sm text-gray-600">
+              {new Date(period.end_date).toLocaleDateString('ar-EG')}
+            </td>
+            <td className="px-6 py-4">
               <div className="flex gap-2">
                 <button
-                  onClick={() => onViewRegistrations(period.id, period.name)}
-                  className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                >
-                  <Eye className="w-4 h-4" />
-                  <span className="text-sm">عرض المسجلين</span>
-                </button>
-                <button
-                  onClick={() => onEdit(period)}
+                  onClick={() => onEdit(period.id)}
                   className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
                 >
                   <Edit2 className="w-4 h-4" />
@@ -784,207 +829,22 @@ function PeriodsTable({
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-            </div>
-          </div>
-        );
-      })}
-      {periods.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
-          لا توجد {label.name} حالياً
-        </div>
-      )}
-    </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
-// Updated Registrations Modal with confirm button for exams
-function RegistrationsModal({
-  registrations,
-  periodName,
-  periodType,
-  onClose,
-  onConfirmExam,
-  confirmingExam,
-  getPeriodTitle,
-}: {
-  registrations: any[];
-  periodName: string;
-  periodType: PeriodTabType;
-  onClose: () => void;
-  onConfirmExam?: () => void;
-  confirmingExam?: boolean;
-  getPeriodTitle: (type: PeriodTabType) => string;
-}) {
-  const [searchTerm, setSearchTerm] = useState('');
-  
-  // Group registrations by coach
-  const groupedByCoach: Record<string, Registration[]> = registrations.reduce((acc: Record<string, Registration[]>, reg: Registration) => {
-    const coachName = reg.coach?.full_name || 'مدرب غير معروف';
-    if (!acc[coachName]) acc[coachName] = [];
-    acc[coachName].push(reg);
-    return acc;
-  }, {});
-
-  // Filter coaches based on search term
-  const filteredCoaches = Object.entries(groupedByCoach).filter(([coachName]) => {
-    if (!searchTerm.trim()) return true;
-    return coachName.toLowerCase().includes(searchTerm.toLowerCase());
-  });
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
-          <h3 className="text-lg font-semibold text-gray-900">
-            المسجلين في {periodName} ({getPeriodTitle(periodType)})
-          </h3>
-          <div className="flex gap-3">
-            {periodType === 'exam' && onConfirmExam && registrations.length > 0 && (
-              <button
-                onClick={onConfirmExam}
-                disabled={confirmingExam}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50"
-              >
-                <CheckCircle className="w-4 h-4" />
-                <span>{confirmingExam ? 'جاري التأكيد...' : 'تأكيد تسجيل الاختبار الحالي'}</span>
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        <div className="p-6">
-          {/* Search Input */}
-          <div className="mb-6">
-            <div className="relative">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="ابحث عن مدرب بالاسم..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pr-12 pl-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* Coaches List */}
-          <div className="space-y-6">
-            {filteredCoaches.map(([coachName, coachRegistrations]) => {
-              const organizationName = coachRegistrations[0]?.coach?.organization?.name || 'لا يوجد';
-              
-              return (
-                <div key={coachName} className="border rounded-lg overflow-hidden">
-                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3 border-b">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <div>
-                        <h4 className="font-semibold text-gray-900 text-lg">المدرب: {coachName}</h4>
-                        <p className="text-sm text-blue-700 mt-1">
-                          <Building2 className="w-4 h-4 inline ml-1" />
-                          {organizationName}
-                        </p>
-                      </div>
-                      <p className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full inline-block">
-                        عدد اللاعبين: {coachRegistrations.length}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">اللاعب</th>
-                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الميلاد</th>
-                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام الحالي</th>
-                          {periodType === 'exam' && (
-                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام بعد الترقية</th>
-                          )}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {coachRegistrations.map((reg: Registration) => {
-                          const currentBelt = reg.player?.belt || reg.last_belt || '-';
-                          const nextBelt = periodType === 'exam' ? getNextBelt(currentBelt) : null;
-                          
-                          return (
-                            <tr key={reg.id} className="border-t hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm text-gray-900">{reg.player?.full_name || reg.player_name}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{reg.birth_date || reg.player?.birth_date || '-'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{currentBelt}</td>
-                              {periodType === 'exam' && (
-                                <td className="px-4 py-3 text-sm font-semibold text-green-600">
-                                  {nextBelt ? nextBelt : 'الحد الأقصى'}
-                                </td>
-                              )}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })}
-            {filteredCoaches.length === 0 && (
-              <div className="text-center py-12 text-gray-500">
-                {searchTerm ? 'لا يوجد مدربين مطابقين للبحث' : 'لا يوجد مسجلين في هذه الفترة'}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Helper function to get next belt
-function getNextBelt(currentBelt: string): string | null {
-  const beltHierarchy = [
-    'white',
-    'yellow 10',
-    'yellow 9',
-    'orange 8',
-    'orange 7',
-    'green 6',
-    'green 5',
-    'blue 4',
-    'blue 3',
-    'brown 2',
-    'brown 1',
-    'black'
-  ];
-
-  const currentIndex = beltHierarchy.indexOf(currentBelt);
-  if (currentIndex === -1 || currentIndex === beltHierarchy.length - 1) {
-    return null;
-  }
-  return beltHierarchy[currentIndex + 1];
-}
-
-// FormModal component
 function FormModal({
   type,
-  periodType,
   editingId,
-  editingPeriod,
   onClose,
   onSuccess,
 }: {
-  type: string;
-  periodType?: 'exam' | 'secondary' | 'championship';
+  type: TabType;
   editingId: string | null;
-  editingPeriod: {
-    id: string;
-    type: PeriodTabType;
-    name: string;
-    start_date: string;
-    end_date: string;
-  } | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -1000,16 +860,10 @@ function FormModal({
       loadCoaches();
     }
 
-    if (editingId && type !== 'period') {
+    if (editingId) {
       loadExistingData();
-    } else if (editingPeriod && type === 'period') {
-      setFormData({
-        name: editingPeriod.name,
-        start_date: editingPeriod.start_date,
-        end_date: editingPeriod.end_date,
-      });
     }
-  }, [type, editingId, editingPeriod]);
+  }, [type, editingId]);
 
   const loadOrganizations = async () => {
     const { data } = await supabase.from('organizations').select('*').order('name');
@@ -1026,12 +880,14 @@ function FormModal({
     if (type === 'organizations') table = 'organizations';
     else if (type === 'coaches') table = 'profiles';
     else if (type === 'players') table = 'players';
+    else if (type === 'examPeriods') table = 'exam_periods';
+    else if (type === 'secondaryPeriods') table = 'secondary_registration_periods';
+    else if (type === 'championshipPeriods') table = 'tournament_periods';
+    else return;
 
-    if (table) {
-      const { data } = await supabase.from(table).select('*').eq('id', editingId).maybeSingle();
-      if (data) {
-        setFormData(data);
-      }
+    const { data } = await supabase.from(table).select('*').eq('id', editingId).maybeSingle();
+    if (data) {
+      setFormData(data);
     }
   };
 
@@ -1040,14 +896,18 @@ function FormModal({
     setLoading(true);
 
     try {
-      if (type === 'period' && periodType) {
-        await savePeriod();
-      } else if (type === 'organizations') {
+      if (type === 'organizations') {
         await saveOrganization();
       } else if (type === 'coaches') {
         await saveCoach();
       } else if (type === 'players') {
         await savePlayer();
+      } else if (type === 'examPeriods') {
+        await savePeriod('exam_periods');
+      } else if (type === 'secondaryPeriods') {
+        await savePeriod('secondary_registration_periods');
+      } else if (type === 'championshipPeriods') {
+        await savePeriod('tournament_periods');
       }
       onSuccess();
     } catch (error) {
@@ -1055,29 +915,6 @@ function FormModal({
       alert('حدث خطأ أثناء الحفظ');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const savePeriod = async () => {
-    let table = '';
-    if (periodType === 'exam') table = 'exam_periods';
-    else if (periodType === 'secondary') table = 'secondary_registration_periods';
-    else table = 'championship_periods';
-
-    const data = {
-      name: formData.name,
-      start_date: formData.start_date,
-      end_date: formData.end_date,
-    };
-
-    const periodId = editingPeriod?.id || editingId;
-    
-    if (periodId) {
-      const { error } = await supabase.from(table).update(data).eq('id', periodId);
-      if (error) throw error;
-    } else {
-      const { error } = await supabase.from(table).insert([data]);
-      if (error) throw error;
     }
   };
 
@@ -1112,8 +949,8 @@ function FormModal({
       }]);
     } else {
       await supabase.from('profiles').update({
-        full_name: formData.full_name,
         organization_id: formData.organization_id,
+        full_name: formData.full_name,
       }).eq('id', editingId);
     }
   };
@@ -1125,6 +962,7 @@ function FormModal({
       birth_date: formData.birth_date,
       belt: formData.belt,
       phone: formData.phone,
+      file_number: formData.file_number ? parseInt(formData.file_number) : null,
     };
 
     if (editingId) {
@@ -1134,12 +972,230 @@ function FormModal({
     }
   };
 
+  const savePeriod = async (table: string) => {
+    const data = {
+      name: formData.name,
+      start_date: formData.start_date,
+      end_date: formData.end_date,
+    };
+
+    if (editingId) {
+      await supabase.from(table).update(data).eq('id', editingId);
+    } else {
+      await supabase.from(table).insert([data]);
+    }
+  };
+
+  const renderFormFields = () => {
+    if (type === 'organizations') {
+      return (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
+            <input
+              type="text"
+              required
+              value={formData.name || ''}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">النوع</label>
+            <select
+              required
+              value={formData.type || ''}
+              onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">اختر النوع</option>
+              <option value="club">نادي</option>
+              <option value="youth_center">مركز شباب</option>
+            </select>
+          </div>
+        </>
+      );
+    }
+
+    if (type === 'coaches') {
+      return (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">الاسم الكامل</label>
+            <input
+              type="text"
+              required
+              value={formData.full_name || ''}
+              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">المؤسسة</label>
+            <select
+              required
+              value={formData.organization_id || ''}
+              onChange={(e) => setFormData({ ...formData, organization_id: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">اختر المؤسسة</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {!editingId && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">البريد الإلكتروني</label>
+                <input
+                  type="email"
+                  required
+                  value={formData.email || ''}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">كلمة المرور</label>
+                <input
+                  type="password"
+                  required
+                  value={formData.password || ''}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </>
+          )}
+        </>
+      );
+    }
+
+    if (type === 'players') {
+      return (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">الاسم الكامل</label>
+            <input
+              type="text"
+              required
+              value={formData.full_name || ''}
+              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">المدرب</label>
+            <select
+              required
+              value={formData.coach_id || ''}
+              onChange={(e) => setFormData({ ...formData, coach_id: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">اختر المدرب</option>
+              {coaches.map((coach) => (
+                <option key={coach.id} value={coach.id}>
+                  {coach.full_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">الرقم</label>
+            <input
+              type="text"
+              value={formData.file_number || ''}
+              onChange={(e) => setFormData({ ...formData, file_number: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">تاريخ الميلاد</label>
+            <input
+              type="date"
+              value={formData.birth_date || ''}
+              onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">مستوى الحزام</label>
+            <select
+              value={formData.belt || 'white'}
+              onChange={(e) => setFormData({ ...formData, belt: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="white">أبيض</option>
+              <option value="yellow">أصفر</option>
+              <option value="orange">برتقالي</option>
+              <option value="green">أخضر</option>
+              <option value="blue">أزرق</option>
+              <option value="brown">بني</option>
+              <option value="black">أسود</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">رقم الهاتف</label>
+            <input
+              type="tel"
+              value={formData.phone || ''}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        </>
+      );
+    }
+
+    if (type === 'examPeriods' || type === 'secondaryPeriods' || type === 'championshipPeriods') {
+      return (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">الاسم</label>
+            <input
+              type="text"
+              required
+              value={formData.name || ''}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">تاريخ البدء</label>
+            <input
+              type="date"
+              required
+              value={formData.start_date || ''}
+              onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">تاريخ الانتهاء</label>
+            <input
+              type="date"
+              required
+              value={formData.end_date || ''}
+              onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        </>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b">
           <h3 className="text-lg font-semibold text-gray-900">
-            {editingId || editingPeriod ? 'تعديل' : 'إضافة جديد'}
+            {editingId ? 'تعديل' : 'إضافة جديد'}
           </h3>
           <button
             onClick={onClose}
@@ -1150,226 +1206,7 @@ function FormModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Period Form */}
-          {type === 'period' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  الاسم
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name || ''}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  تاريخ البدء
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={formData.start_date || ''}
-                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  تاريخ الانتهاء
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={formData.end_date || ''}
-                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-            </>
-          )}
-
-          {/* Organization Form */}
-          {type === 'organizations' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  الاسم
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name || ''}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  النوع
-                </label>
-                <select
-                  required
-                  value={formData.type || ''}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">اختر النوع</option>
-                  <option value="club">نادي</option>
-                  <option value="youth_center">مركز شباب</option>
-                </select>
-              </div>
-            </>
-          )}
-
-          {/* Coach Form */}
-          {type === 'coaches' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  الاسم
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.full_name || ''}
-                  onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  المؤسسة
-                </label>
-                <select
-                  required
-                  value={formData.organization_id || ''}
-                  onChange={(e) => setFormData({ ...formData, organization_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">اختر المؤسسة</option>
-                  {organizations.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {!editingId && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      البريد الإلكتروني
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={formData.email || ''}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      كلمة المرور
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      value={formData.password || ''}
-                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {/* Player Form */}
-          {type === 'players' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  الاسم
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.full_name || ''}
-                  onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  المدرب
-                </label>
-                <select
-                  required
-                  value={formData.coach_id || ''}
-                  onChange={(e) => setFormData({ ...formData, coach_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">اختر المدرب</option>
-                  {coaches.map((coach) => (
-                    <option key={coach.id} value={coach.id}>
-                      {coach.full_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  تاريخ الميلاد
-                </label>
-                <input
-                  type="date"
-                  value={formData.birth_date || ''}
-                  onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  مستوى الحزام
-                </label>
-                <select
-                  required
-                  value={formData.belt || 'white'}
-                  onChange={(e) => setFormData({ ...formData, belt: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="white">أبيض</option>
-                  <option value="yellow 10">اصفر 10</option>
-                  <option value="yellow 9">اصفر 9</option>
-                  <option value="orange 8">برتقالى 8</option>
-                  <option value="orange 7">برتقالى 7</option>
-                  <option value="green 6">اخضر 6</option>
-                  <option value="green 5">اخضر 5</option>
-                  <option value="blue 4">ازرق 4</option>
-                  <option value="blue 3">ازرق 3</option>
-                  <option value="brown 2">بنى 2</option>
-                  <option value="brown 1">بنى 1</option>
-                  <option value="black">أسود</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  رقم الهاتف
-                </label>
-                <input
-                  type="tel"
-                  value={formData.phone || ''}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-            </>
-          )}
+          {renderFormFields()}
 
           <div className="flex gap-3 pt-4">
             <button
