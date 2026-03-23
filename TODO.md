@@ -1,12 +1,12 @@
-# Fix TypeScript Errors in AdminDashboard.tsx - COMPLETE
+# Fix TypeScript Errors in AdminDashboard.tsx - Approved Plan
 
-## Steps:
-- [x] Step 1: Fix destructuring in loadData() function (all switch cases: organizations, coaches, players, exam_periods, secondary_registration_periods, championship_periods, active_periods)
-- [x] Step 2: Fix loadCoaches() function
-- [x] Step 3: Fix filterPlayersByCoach() function
-- [x] Step 4: Verify no remaining TS errors and test runtime
+Status: Steps to complete
 
-**All TypeScript errors in src/pages/AdminDashboard.tsx are now fixed by correcting Supabase response destructuring from `{ var }` to `{ data: var }` in all query locations.**
+1. ~~Create TODO.md~~ (Done)
+2. Update CoachesTable: coach.name → coach.full_name, coach.username → coach.email
+3. Update PlayersTable: player.name → player.full_name, player.coach?.name → player.coach?.full_name, player.belt_level → player.belt, player.phone → player.file_number || 'غير محدد'
+4. Update FormModal coaches option: coach.name → coach.full_name
+5. Verify no TS errors and test
+6. Mark complete and attempt_completion
 
-Current progress: Task complete ✅
-
+Next step: 2-4 via edit_file

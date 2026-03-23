@@ -16,8 +16,10 @@ export interface Organization {
 }
 
 export interface Profile {
+
   id: string;
   full_name: string;
+  name: string;
   role: UserRole;
   organization_id: string | null;
   created_at: string;
@@ -25,19 +27,26 @@ export interface Profile {
 }
 
 export interface Coach extends Profile {
+
   email: string;
+  name: string;
+  username: string;
   // Coach is a Profile with role 'coach'
 }
 
 export interface Player {
+
   player_type: string;
   organization: any;
   id: string;
   full_name: string;
+  name: string;
   age: number | null;
   belt: string | null;
+  belt_level: string;
   coach_id: string;
   file_number: string | null;
+  phone: string;
   birth_date: string | null;
   created_at: string;
   coach?: Profile;
