@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Player, Coach } from '../lib/supabase';
-import { LogOut, Search, UserCircle, Calendar, Trophy, BookOpen, CheckCircle, Loader2, XCircle } from 'lucide-react';
+import { LogOut, Search, UserCircle, Calendar, Trophy, BookOpen, Loader2, XCircle } from 'lucide-react';
 
 interface ExtendedPlayer extends Player {
   examRegistered?: boolean;
@@ -46,11 +46,6 @@ export default function CoachDashboard() {
   const [activeExam, setActiveExam] = useState<ExamPeriod | null>(null);
   const [activeSecondary, setActiveSecondary] = useState<SecondaryPeriod | null>(null);
   const [activeChampionship, setActiveChampionship] = useState<ChampionshipPeriod | null>(null);
-  
-  // Registration status
-  const [examRegistrations, setExamRegistrations] = useState<Set<string>>(new Set());
-  const [secondaryRegistrations, setSecondaryRegistrations] = useState<Set<string>>(new Set());
-  const [championshipRegistrations, setChampionshipRegistrations] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (user) {
@@ -124,7 +119,7 @@ export default function CoachDashboard() {
         
         setActiveChampionship(activeChampData || null);
 
-        // Load existing registrations
+        // Load existing registrations and update playersList
         if (activeExamData) {
           const { data: examRegs } = await supabase
             .from('exam_registrations')
@@ -132,8 +127,7 @@ export default function CoachDashboard() {
             .eq('exam_period_id', activeExamData.id)
             .eq('coach_id', coachData.id);
           
-          const examSet = new Set(examRegs?.map(r => r.player_id) || []);
-          setExamRegistrations(examSet);
+          const examSet = new Set(examRegs?.map((r: { player_id: string }) => r.player_id) || []);
           playersList.forEach(p => p.examRegistered = examSet.has(p.id));
         }
 
@@ -144,8 +138,7 @@ export default function CoachDashboard() {
             .eq('secondary_period_id', activeSecondaryData.id)
             .eq('coach_id', coachData.id);
           
-          const secondarySet = new Set(secondaryRegs?.map(r => r.player_id) || []);
-          setSecondaryRegistrations(secondarySet);
+          const secondarySet = new Set(secondaryRegs?.map((r: { player_id: string }) => r.player_id) || []);
           playersList.forEach(p => p.secondaryRegistered = secondarySet.has(p.id));
         }
 
@@ -156,8 +149,7 @@ export default function CoachDashboard() {
             .eq('tournament_period_id', activeChampData.id)
             .eq('coach_id', coachData.id);
           
-          const champSet = new Set(champRegs?.map(r => r.player_id) || []);
-          setChampionshipRegistrations(champSet);
+          const champSet = new Set(champRegs?.map((r: { player_id: string }) => r.player_id) || []);
           playersList.forEach(p => p.championshipRegistered = champSet.has(p.id));
         }
 
@@ -211,11 +203,10 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-        setExamRegistrations(prev => new Set([...prev, playerId]));
-        setPlayers(prev => prev.map(p => 
+        setPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, examRegistered: true } : p
         ));
-        setFilteredPlayers(prev => prev.map(p => 
+        setFilteredPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, examRegistered: true } : p
         ));
         alert('تم تسجيل اللاعب في الاختبار بنجاح');
@@ -234,11 +225,10 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-        setSecondaryRegistrations(prev => new Set([...prev, playerId]));
-        setPlayers(prev => prev.map(p => 
+        setPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, secondaryRegistered: true } : p
         ));
-        setFilteredPlayers(prev => prev.map(p => 
+        setFilteredPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, secondaryRegistered: true } : p
         ));
         alert('تم تسجيل اللاعب في التسجيل الثانوي بنجاح');
@@ -257,11 +247,10 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-        setChampionshipRegistrations(prev => new Set([...prev, playerId]));
-        setPlayers(prev => prev.map(p => 
+        setPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, championshipRegistered: true } : p
         ));
-        setFilteredPlayers(prev => prev.map(p => 
+        setFilteredPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, championshipRegistered: true } : p
         ));
         alert('تم تسجيل اللاعب في البطولة بنجاح');
@@ -294,15 +283,10 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-        setExamRegistrations(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(playerId);
-          return newSet;
-        });
-        setPlayers(prev => prev.map(p => 
+        setPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, examRegistered: false } : p
         ));
-        setFilteredPlayers(prev => prev.map(p => 
+        setFilteredPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, examRegistered: false } : p
         ));
         alert('تم إلغاء تسجيل اللاعب من الاختبار بنجاح');
@@ -317,15 +301,10 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-        setSecondaryRegistrations(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(playerId);
-          return newSet;
-        });
-        setPlayers(prev => prev.map(p => 
+        setPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, secondaryRegistered: false } : p
         ));
-        setFilteredPlayers(prev => prev.map(p => 
+        setFilteredPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, secondaryRegistered: false } : p
         ));
         alert('تم إلغاء تسجيل اللاعب من التسجيل الثانوي بنجاح');
@@ -340,15 +319,10 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-        setChampionshipRegistrations(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(playerId);
-          return newSet;
-        });
-        setPlayers(prev => prev.map(p => 
+        setPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, championshipRegistered: false } : p
         ));
-        setFilteredPlayers(prev => prev.map(p => 
+        setFilteredPlayers((prev: ExtendedPlayer[]) => prev.map(p => 
           p.id === playerId ? { ...p, championshipRegistered: false } : p
         ));
         alert('تم إلغاء تسجيل اللاعب من البطولة بنجاح');
