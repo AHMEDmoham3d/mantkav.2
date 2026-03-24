@@ -90,7 +90,7 @@ export default function AdminDashboard() {
     if (activeTab === 'viewRegistrations') {
       loadPeriodsForDropdown();
     }
-  }, [activeTab]);
+  }, [activeTab, selectedPeriodType]);
 
   const loadData = async () => {
     setLoading(true);
@@ -165,6 +165,10 @@ export default function AdminDashboard() {
       setPeriodsForDropdown(data || []);
       if (data && data.length > 0 && !selectedPeriodId) {
         setSelectedPeriodId(data[0].id);
+        // Auto load registrations when a period is selected
+        setTimeout(() => {
+          loadRegistrations();
+        }, 100);
       }
     } catch (error) {
       console.error('Error loading periods:', error);
@@ -182,32 +186,68 @@ export default function AdminDashboard() {
       let registrations: any[] = [];
       
       if (selectedPeriodType === 'exam') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('exam_registrations')
           .select(`
             *,
-            coach:coach_id (id, full_name, email, organization:organization_id (name))
+            coach:coach_id (
+              id, 
+              full_name, 
+              email, 
+              organization:organization_id (
+                name
+              )
+            )
           `)
           .eq('exam_period_id', selectedPeriodId);
+        
+        if (error) {
+          console.error('Error fetching exam registrations:', error);
+        }
         registrations = data || [];
+        console.log('Exam registrations loaded:', registrations.length);
       } else if (selectedPeriodType === 'secondary') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('secondary_registrations')
           .select(`
             *,
-            coach:coach_id (id, full_name, email, organization:organization_id (name))
+            coach:coach_id (
+              id, 
+              full_name, 
+              email, 
+              organization:organization_id (
+                name
+              )
+            )
           `)
           .eq('secondary_period_id', selectedPeriodId);
+        
+        if (error) {
+          console.error('Error fetching secondary registrations:', error);
+        }
         registrations = data || [];
+        console.log('Secondary registrations loaded:', registrations.length);
       } else {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('tournament_registrations')
           .select(`
             *,
-            coach:coach_id (id, full_name, email, organization:organization_id (name))
+            coach:coach_id (
+              id, 
+              full_name, 
+              email, 
+              organization:organization_id (
+                name
+              )
+            )
           `)
           .eq('tournament_period_id', selectedPeriodId);
+        
+        if (error) {
+          console.error('Error fetching championship registrations:', error);
+        }
         registrations = data || [];
+        console.log('Championship registrations loaded:', registrations.length);
       }
 
       // Group by coach
@@ -215,13 +255,16 @@ export default function AdminDashboard() {
       
       registrations.forEach(reg => {
         const coachData = reg.coach;
-        if (!coachData) return;
+        if (!coachData) {
+          console.log('Registration without coach data:', reg);
+          return;
+        }
         
         const coachId = coachData.id;
         if (!groupsMap.has(coachId)) {
           groupsMap.set(coachId, {
             coachId: coachId,
-            coachName: coachData.full_name,
+            coachName: coachData.full_name || 'غير معروف',
             coachEmail: coachData.email,
             organizationName: coachData.organization?.name || 'غير محدد',
             players: []
@@ -236,8 +279,13 @@ export default function AdminDashboard() {
         });
       });
       
-      setRegistrationsGroups(Array.from(groupsMap.values()));
+      const groups = Array.from(groupsMap.values());
+      setRegistrationsGroups(groups);
       setExpandedCoaches(new Set());
+      
+      if (groups.length === 0) {
+        console.log('No registrations found for this period');
+      }
     } catch (error) {
       console.error('Error loading registrations:', error);
       alert('حدث خطأ أثناء تحميل البيانات');
@@ -498,6 +546,7 @@ export default function AdminDashboard() {
                             setSelectedPeriodType(e.target.value as any);
                             setSelectedPeriodId('');
                             setRegistrationsGroups([]);
+                            setPeriodsForDropdown([]);
                           }}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                         >
@@ -510,7 +559,10 @@ export default function AdminDashboard() {
                         <label className="block text-sm font-medium text-gray-700 mb-2">اختر الفترة</label>
                         <select
                           value={selectedPeriodId}
-                          onChange={(e) => setSelectedPeriodId(e.target.value)}
+                          onChange={(e) => {
+                            setSelectedPeriodId(e.target.value);
+                            setRegistrationsGroups([]);
+                          }}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                         >
                           <option value="">اختر فترة</option>
@@ -523,7 +575,8 @@ export default function AdminDashboard() {
                       </div>
                       <button
                         onClick={loadRegistrations}
-                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+                        disabled={!selectedPeriodId}
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         عرض
                       </button>
@@ -532,6 +585,7 @@ export default function AdminDashboard() {
                     {viewLoading ? (
                       <div className="text-center py-12">
                         <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="mt-4 text-gray-600">جاري تحميل البيانات...</p>
                       </div>
                     ) : registrationsGroups.length > 0 ? (
                       <>
@@ -578,7 +632,7 @@ export default function AdminDashboard() {
                                         <th className="px-4 py-2 text-right text-sm font-semibold">اللاعب</th>
                                         <th className="px-4 py-2 text-right text-sm font-semibold">تاريخ الميلاد</th>
                                         <th className="px-4 py-2 text-right text-sm font-semibold">الحزام</th>
-                                      </tr>
+                                       </tr>
                                     </thead>
                                     <tbody>
                                       {group.players.map(player => (
@@ -650,7 +704,7 @@ function OrganizationsTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">النوع</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+        </tr>
       </thead>
       <tbody>
         {organizations.map((org) => (
