@@ -1,12 +1,12 @@
-# Fix TypeScript Errors in AdminDashboard.tsx - Approved Plan
+# Coach Dashboard Restoration Plan
 
-Status: Steps to complete
+## Steps:
+- [x] Step 1: Implement registerExam/registerSecondary/registerChampionship handlers in CoachDashboard.tsx (INSERT to exam_registrations/secondary_registrations/championship_registrations using player.full_name, birth_date, belt).
+- [x] Step 2: Implement unregister handlers (DELETE WHERE period_id AND player_id).
+- [x] Step 3: Add buttons in players table: for each active period, show Register/Unregister button per player.
+- [x] Step 4: Extend downloadRegisteredPlayers to handle secondary/champ (add param or conditional).
+- [x] Step 5: Add useCallback/refresh data after each action.
+- [x] Step 6: Test: coach login, active periods, register/unreg, download, admin view unchanged.
+- [x] Complete: attempt_completion.
 
-1. ~~Create TODO.md~~ (Done)
-2. Update CoachesTable: coach.name → coach.full_name, coach.username → coach.email
-3. Update PlayersTable: player.name → player.full_name, player.coach?.name → player.coach?.full_name, player.belt_level → player.belt, player.phone → player.file_number || 'غير محدد'
-4. Update FormModal coaches option: coach.name → coach.full_name
-5. Verify no TS errors and test
-6. Mark complete and attempt_completion
 
-Next step: 2-4 via edit_file
