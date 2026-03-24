@@ -1,597 +1,532 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, Player, Coach, ExamRegistration, SecondaryRegistration, ChampionshipRegistration } from '../lib/supabase';
-import type { ExamPeriod, SecondaryRegistrationPeriod, ChampionshipPeriod } from '../lib/supabase';
+import { supabase, Player, Coach } from '../lib/supabase';
+import { LogOut, Search, UserCircle, Calendar, Trophy, BookOpen, CheckCircle, Loader2 } from 'lucide-react';
 
 interface ExtendedPlayer extends Player {
-  registered?: boolean;
+  examRegistered?: boolean;
   secondaryRegistered?: boolean;
   championshipRegistered?: boolean;
 }
 
-import { LogOut, Search, UserCircle, CheckCircle, XCircle, Download, Users, Trophy, Plus, Minus } from 'lucide-react';
-import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType } from 'docx';
+interface ExamPeriod {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+}
+
+interface SecondaryPeriod {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+}
+
+interface ChampionshipPeriod {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+}
 
 export default function CoachDashboard() {
   const { signOut, user } = useAuth();
   const [coach, setCoach] = useState<Coach | null>(null);
   const [players, setPlayers] = useState<ExtendedPlayer[]>([]);
   const [filteredPlayers, setFilteredPlayers] = useState<ExtendedPlayer[]>([]);
-  const [registeredPlayers, setRegisteredPlayers] = useState<ExamRegistration[]>([]);
-  const [secondaryRegisteredPlayers, setSecondaryRegisteredPlayers] = useState<SecondaryRegistration[]>([]);
-  const [championshipRegisteredPlayers, setChampionshipRegisteredPlayers] = useState<ChampionshipRegistration[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [registeringPlayer, setRegisteringPlayer] = useState<string | null>(null);
+  const [registeringType, setRegisteringType] = useState<'exam' | 'secondary' | 'championship' | null>(null);
+  
+  // Active periods
   const [activeExam, setActiveExam] = useState<ExamPeriod | null>(null);
-  const [activeSecondaryRegistration, setActiveSecondaryRegistration] = useState<SecondaryRegistrationPeriod | null>(null);
+  const [activeSecondary, setActiveSecondary] = useState<SecondaryPeriod | null>(null);
   const [activeChampionship, setActiveChampionship] = useState<ChampionshipPeriod | null>(null);
+  
+  // Registration status
 
-  const loadCoachData = useCallback(async () => {
+  useEffect(() => {
+    if (user) {
+      loadCoachData();
+    }
+  }, [user]);
+
+  useEffect(() => {
+    filterPlayers();
+  }, [searchTerm, players]);
+
+  const loadCoachData = async () => {
     if (!user) return;
 
     setLoading(true);
     try {
+      // Get coach profile
       const { data: coachData } = await supabase
         .from('profiles')
         .select('*, organization:organizations(*)')
         .eq('id', user.id)
-        .single();
+        .eq('role', 'coach')
+        .maybeSingle();
 
-      setCoach(coachData || null);
+      if (coachData) {
+        setCoach(coachData);
 
-      const { data: playersData } = await supabase
-        .from('players')
-        .select('*')
-        .eq('coach_id', user.id)
-        .order('full_name');
-
-      const playersList: ExtendedPlayer[] = (playersData || []) as ExtendedPlayer[];
-
-      const today = new Date().toISOString().split('T')[0];
-
-      const { data: activeExamData } = await supabase
-        .from('exam_periods')
-        .select('*')
-        .lte('start_date', today)
-        .gte('end_date', today);
-      const exam = activeExamData?.[0];
-      setActiveExam(exam);
-
-      const { data: activeSecondaryData } = await supabase
-        .from('secondary_registration_periods')
-        .select('*')
-        .lte('start_date', today)
-        .gte('end_date', today);
-      const secondary = activeSecondaryData?.[0];
-      setActiveSecondaryRegistration(secondary);
-
-      const { data: activeChampData } = await supabase
-        .from('championship_periods')
-        .select('*')
-        .lte('start_date', today)
-        .gte('end_date', today);
-      const champ = activeChampData?.[0];
-      setActiveChampionship(champ);
-
-      if (activeExam && activeExam.id) {
-        const { data: registrations } = await supabase
-          .from('exam_registrations')
+        // Get players for this coach
+        const { data: playersData } = await supabase
+          .from('players')
           .select('*')
-          .eq('coach_id', user.id)
-          .eq('exam_period_id', activeExam.id);
+          .eq('coach_id', coachData.id)
+          .order('full_name');
 
-        setRegisteredPlayers(registrations || []);
-        const registeredIds = registrations?.map(r => r.player_id) || [];
-        playersList.forEach(player => {
-          player.registered = registeredIds.includes(player.id);
-        });
-      }
+        const playersList: ExtendedPlayer[] = (playersData || []).map(p => ({ 
+          ...p, 
+          examRegistered: false, 
+          secondaryRegistered: false, 
+          championshipRegistered: false 
+        }));
+        
+        const today = new Date().toISOString().split('T')[0];
 
-      if (activeSecondaryRegistration && activeSecondaryRegistration.id) {
-        const { data: secondaryRegs } = await supabase
-          .from('secondary_registrations')
+        // Check for active exam period
+        const { data: activeExamData } = await supabase
+          .from('exam_periods')
           .select('*')
-          .eq('coach_id', user.id)
-          .eq('secondary_period_id', activeSecondaryRegistration.id);
+          .lte('start_date', today)
+          .gte('end_date', today)
+          .maybeSingle();
+        
+        setActiveExam(activeExamData || null);
 
-        setSecondaryRegisteredPlayers(secondaryRegs || []);
-        const secondaryIds = secondaryRegs?.map(r => r.player_id) || [];
-        playersList.forEach(player => {
-          player.secondaryRegistered = secondaryIds.includes(player.id);
-        });
-      }
-
-      if (activeChampionship && activeChampionship.id) {
-        const { data: champRegs } = await supabase
-          .from('championship_registrations')
+        // Check for active secondary registration period
+        const { data: activeSecondaryData } = await supabase
+          .from('secondary_registration_periods')
           .select('*')
-          .eq('coach_id', user.id)
-          .eq('championship_period_id', activeChampionship.id);
+          .lte('start_date', today)
+          .gte('end_date', today)
+          .maybeSingle();
+        
+        setActiveSecondary(activeSecondaryData || null);
 
-        setChampionshipRegisteredPlayers(champRegs || []);
-        const champIds = champRegs?.map(r => r.player_id) || [];
-        playersList.forEach(player => {
-          player.championshipRegistered = champIds.includes(player.id);
-        });
+        // Check for active championship period
+        const { data: activeChampData } = await supabase
+          .from('tournament_periods')
+          .select('*')
+          .lte('start_date', today)
+          .gte('end_date', today)
+          .maybeSingle();
+        
+        setActiveChampionship(activeChampData || null);
+
+        // Load existing registrations
+        if (activeExamData) {
+          const { data: examRegs } = await supabase
+            .from('exam_registrations')
+            .select('player_id')
+            .eq('exam_period_id', activeExamData.id)
+            .eq('coach_id', coachData.id);
+          
+          const examSet = new Set(examRegs?.map(r => r.player_id) || []);
+          playersList.forEach(p => p.examRegistered = examSet.has(p.id));
+        }
+
+        if (activeSecondaryData) {
+          const { data: secondaryRegs } = await supabase
+            .from('secondary_registrations')
+            .select('player_id')
+            .eq('secondary_period_id', activeSecondaryData.id)
+            .eq('coach_id', coachData.id);
+          
+          const secondarySet = new Set(secondaryRegs?.map(r => r.player_id) || []);
+          playersList.forEach(p => p.secondaryRegistered = secondarySet.has(p.id));
+        }
+
+        if (activeChampData) {
+          const { data: champRegs } = await supabase
+            .from('tournament_registrations')
+            .select('player_id')
+            .eq('tournament_period_id', activeChampData.id)
+            .eq('coach_id', coachData.id);
+          
+          const champSet = new Set(champRegs?.map(r => r.player_id) || []);
+          playersList.forEach(p => p.championshipRegistered = champSet.has(p.id));
+        }
+
+        setPlayers(playersList);
+        setFilteredPlayers(playersList);
       }
-
-      setPlayers(playersList);
-      setFilteredPlayers(playersList);
     } catch (error) {
       console.error('Error loading coach data:', error);
     } finally {
       setLoading(false);
     }
-  }, [user]);
-
-  const registerExam = async (player: ExtendedPlayer) => {
-    if (!activeExam) return;
-    try {
-      const { error } = await supabase
-        .from('exam_registrations')
-        .insert({
-          exam_period_id: activeExam.id,
-          player_id: player.id,
-          coach_id: user!.id,
-          player_name: player.full_name,
-          birth_date: player.birth_date,
-          last_belt: player.belt,
-        });
-      if (error) throw error;
-      loadCoachData();
-    } catch (error) {
-      console.error('Registration error:', error);
-      alert('خطأ في التسجيل');
-    }
   };
 
-  const unregisterExam = async (player: ExtendedPlayer) => {
-    if (!activeExam) return;
-    try {
-      const { error } = await supabase
-        .from('exam_registrations')
-        .delete()
-        .eq('exam_period_id', activeExam.id)
-        .eq('player_id', player.id)
-        .eq('coach_id', user!.id);
-      if (error) throw error;
-      loadCoachData();
-    } catch (error) {
-      console.error('Unregistration error:', error);
-      alert('خطأ في إلغاء التسجيل');
-    }
-  };
-
-  const registerSecondary = async (player: ExtendedPlayer) => {
-    if (!activeSecondaryRegistration) return;
-    try {
-      const { error } = await supabase
-        .from('secondary_registrations')
-        .insert({
-          secondary_period_id: activeSecondaryRegistration.id,
-          player_id: player.id,
-          coach_id: user!.id,
-          player_name: player.full_name,
-          birth_date: player.birth_date,
-          last_belt: player.belt,
-        });
-      if (error) throw error;
-      loadCoachData();
-    } catch (error) {
-      console.error('Registration error:', error);
-      alert('خطأ في التسجيل');
-    }
-  };
-
-  const unregisterSecondary = async (player: ExtendedPlayer) => {
-    if (!activeSecondaryRegistration) return;
-    try {
-      const { error } = await supabase
-        .from('secondary_registrations')
-        .delete()
-        .eq('secondary_period_id', activeSecondaryRegistration.id)
-        .eq('player_id', player.id)
-        .eq('coach_id', user!.id);
-      if (error) throw error;
-      loadCoachData();
-    } catch (error) {
-      console.error('Unregistration error:', error);
-      alert('خطأ في إلغاء التسجيل');
-    }
-  };
-
-  const registerChampionship = async (player: ExtendedPlayer) => {
-    if (!activeChampionship) return;
-    try {
-      const { error } = await supabase
-        .from('championship_registrations')
-        .insert({
-          championship_period_id: activeChampionship.id,
-          player_id: player.id,
-          coach_id: user!.id,
-          player_name: player.full_name,
-          birth_date: player.birth_date,
-          last_belt: player.belt,
-        });
-      if (error) throw error;
-      loadCoachData();
-    } catch (error) {
-      console.error('Registration error:', error);
-      alert('خطأ في التسجيل');
-    }
-  };
-
-  const unregisterChampionship = async (player: ExtendedPlayer) => {
-    if (!activeChampionship) return;
-    try {
-      const { error } = await supabase
-        .from('championship_registrations')
-        .delete()
-        .eq('championship_period_id', activeChampionship.id)
-        .eq('player_id', player.id)
-        .eq('coach_id', user!.id);
-      if (error) throw error;
-      loadCoachData();
-    } catch (error) {
-      console.error('Unregistration error:', error);
-      alert('خطأ في إلغاء التسجيل');
-    }
-  };
-
-  useEffect(() => {
-    loadCoachData();
-  }, [user, loadCoachData]);
-
-  useEffect(() => {
+  const filterPlayers = () => {
     if (!searchTerm.trim()) {
       setFilteredPlayers(players);
       return;
     }
 
-    const filtered = players.filter(player =>
-      player.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      player.file_number?.includes(searchTerm)
+    const term = searchTerm.toLowerCase();
+    const filtered = players.filter(
+      (player) =>
+        player.full_name.toLowerCase().includes(term) ||
+        (player.belt && player.belt.toLowerCase().includes(term)) ||
+        (player.file_number && player.file_number.toString().includes(term))
     );
     setFilteredPlayers(filtered);
-  }, [searchTerm, players]);
-
-  const downloadRegisteredPlayers = async () => {
-    if (registeredPlayers.length === 0) {
-      alert('لا يوجد لاعبون مسجلون');
-      return;
-    }
-
-    const table = new Table({
-      rows: [
-        new TableRow({
-          children: [
-            new TableCell({ children: [new Paragraph('الاسم الكامل')], width: { size: 50, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph('تاريخ الميلاد')], width: { size: 25, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph('الحزام')], width: { size: 25, type: WidthType.PERCENTAGE } }),
-          ],
-        }),
-        ...registeredPlayers.map(reg => new TableRow({
-          children: [
-            new TableCell({ children: [new Paragraph(reg.player_name || '')] }),
-            new TableCell({ children: [new Paragraph(reg.birth_date || '')] }),
-            new TableCell({ children: [new Paragraph(reg.last_belt || '')] }),
-          ],
-        })),
-      ],
-    });
-
-    const doc = new Document({
-      sections: [{ children: [new Paragraph({ children: [new TextRun('كشف اللاعبين المسجلين')] }), table] }],
-    });
-
-    const blob = await Packer.toBlob(doc);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `كشف_الاختبار_${new Date().toISOString().slice(0,10)}.docx`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
-  const downloadSecondaryRegisteredPlayers = async () => {
-    if (secondaryRegisteredPlayers.length === 0) {
-      alert('لا يوجد لاعبون مسجلون في التسجيل الثانوي');
-      return;
+  const handleRegister = async (playerId: string, type: 'exam' | 'secondary' | 'championship') => {
+    if (!coach || !playerId) return;
+
+    setRegisteringPlayer(playerId);
+    setRegisteringType(type);
+
+    try {
+      const player = players.find(p => p.id === playerId);
+      if (!player) throw new Error('Player not found');
+
+      if (type === 'exam' && activeExam) {
+        const { error } = await supabase
+          .from('exam_registrations')
+          .insert([{
+            exam_period_id: activeExam.id,
+            player_id: playerId,
+            coach_id: coach.id,
+            player_name: player.full_name,
+            birth_date: player.birth_date,
+            last_belt: player.belt || 'white',
+          }]);
+
+        if (error) throw error;
+        
+
+        setPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, examRegistered: true } : p
+        ));
+        setFilteredPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, examRegistered: true } : p
+        ));
+        alert('تم تسجيل اللاعب في الاختبار بنجاح');
+
+      } else if (type === 'secondary' && activeSecondary) {
+        const { error } = await supabase
+          .from('secondary_registrations')
+          .insert([{
+            secondary_period_id: activeSecondary.id,
+            player_id: playerId,
+            coach_id: coach.id,
+            player_name: player.full_name,
+            birth_date: player.birth_date,
+            last_belt: player.belt || 'white',
+          }]);
+
+        if (error) throw error;
+        
+
+        setPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, secondaryRegistered: true } : p
+        ));
+        setFilteredPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, secondaryRegistered: true } : p
+        ));
+        alert('تم تسجيل اللاعب في التسجيل الثانوي بنجاح');
+
+      } else if (type === 'championship' && activeChampionship) {
+        const { error } = await supabase
+          .from('tournament_registrations')
+          .insert([{
+            tournament_period_id: activeChampionship.id,
+            player_id: playerId,
+            coach_id: coach.id,
+            player_name: player.full_name,
+            birth_date: player.birth_date,
+            last_belt: player.belt || 'white',
+          }]);
+
+        if (error) throw error;
+        
+
+        setPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, championshipRegistered: true } : p
+        ));
+        setFilteredPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, championshipRegistered: true } : p
+        ));
+        alert('تم تسجيل اللاعب في البطولة بنجاح');
+      }
+    } catch (error) {
+      console.error('Error registering player:', error);
+      alert('حدث خطأ أثناء التسجيل');
+    } finally {
+      setRegisteringPlayer(null);
+      setRegisteringType(null);
     }
-
-    const table = new Table({
-      rows: [
-        new TableRow({
-          children: [
-            new TableCell({ children: [new Paragraph('الاسم الكامل')], width: { size: 50, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph('تاريخ الميلاد')], width: { size: 25, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph('الحزام')], width: { size: 25, type: WidthType.PERCENTAGE } }),
-          ],
-        }),
-        ...secondaryRegisteredPlayers.map(reg => new TableRow({
-          children: [
-            new TableCell({ children: [new Paragraph(reg.player_name || '')] }),
-            new TableCell({ children: [new Paragraph(reg.birth_date || '')] }),
-            new TableCell({ children: [new Paragraph(reg.last_belt || '')] }),
-          ],
-        })),
-      ],
-    });
-
-    const doc = new Document({
-      sections: [{ children: [new Paragraph({ children: [new TextRun('كشف التسجيل الثانوي')] }), table] }],
-    });
-
-    const blob = await Packer.toBlob(doc);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `كشف_التسجيل_الثانوي_${new Date().toISOString().slice(0,10)}.docx`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
-  const downloadChampionshipRegisteredPlayers = async () => {
-    if (championshipRegisteredPlayers.length === 0) {
-      alert('لا يوجد لاعبون مسجلون في البطولة');
-      return;
-    }
-
-    const table = new Table({
-      rows: [
-        new TableRow({
-          children: [
-            new TableCell({ children: [new Paragraph('الاسم الكامل')], width: { size: 50, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph('تاريخ الميلاد')], width: { size: 25, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph('الحزام')], width: { size: 25, type: WidthType.PERCENTAGE } }),
-          ],
-        }),
-        ...championshipRegisteredPlayers.map(reg => new TableRow({
-          children: [
-            new TableCell({ children: [new Paragraph(reg.player_name || '')] }),
-            new TableCell({ children: [new Paragraph(reg.birth_date || '')] }),
-            new TableCell({ children: [new Paragraph(reg.last_belt || '')] }),
-          ],
-        })),
-      ],
-    });
-
-    const doc = new Document({
-      sections: [{ children: [new Paragraph({ children: [new TextRun('كشف البطولة')] }), table] }],
-    });
-
-    const blob = await Packer.toBlob(doc);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `كشف_البطولة_${new Date().toISOString().slice(0,10)}.docx`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const getBeltColor = (belt: string | null) => {
+    const beltLower = belt?.toLowerCase() || 'white';
+    const colors: Record<string, string> = {
+      white: 'bg-gray-200 text-gray-800',
+      yellow: 'bg-yellow-200 text-yellow-800',
+      orange: 'bg-orange-200 text-orange-800',
+      green: 'bg-green-200 text-green-800',
+      blue: 'bg-blue-200 text-blue-800',
+      brown: 'bg-amber-700 text-white',
+      black: 'bg-gray-900 text-white',
+    };
+    return colors[beltLower] || 'bg-gray-200 text-gray-800';
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-lg font-medium text-gray-700">جاري تحميل بيانات المدرب...</p>
-        </div>
-      </div>
-    );
-  }
+  const getBeltName = (belt: string | null) => {
+    const beltLower = belt?.toLowerCase() || 'white';
+    const names: Record<string, string> = {
+      white: 'أبيض',
+      yellow: 'أصفر',
+      orange: 'برتقالي',
+      green: 'أخضر',
+      blue: 'أزرق',
+      brown: 'بني',
+      black: 'أسود',
+    };
+    return names[beltLower] || belt || 'أبيض';
+  };
+
+  const isRegistering = (playerId: string, type: 'exam' | 'secondary' | 'championship') => {
+    return registeringPlayer === playerId && registeringType === type;
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 md:p-8" dir="rtl">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-4">
-          <div className="flex items-center gap-4">
-            <UserCircle className="w-12 h-12 text-blue-600" />
+    <div className="min-h-screen bg-gray-50" dir="rtl">
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                لوحة تحكم المدرب {coach?.full_name}
+              <h1 className="text-2xl font-bold text-gray-900">
+                لوحة تحكم المدرب
               </h1>
-              <p className="text-gray-600">{coach?.organization?.name}</p>
+              {coach && (
+                <div className="mt-1 space-y-1">
+                  <p className="text-sm text-gray-600">
+                    المدرب: <span className="font-medium text-gray-900">{coach.full_name}</span>
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    المؤسسة: <span className="font-medium text-gray-900">{coach.organization?.name}</span>
+                  </p>
+                </div>
+              )}
             </div>
+            <button
+              onClick={() => signOut()}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>تسجيل الخروج</span>
+            </button>
           </div>
-          <button
-            onClick={signOut}
-            className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-xl font-medium transition-colors"
-          >
-            <LogOut className="w-5 h-5" />
-            تسجيل الخروج
-          </button>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Active Periods Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {activeExam && (
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center gap-3 mb-3">
+                <Calendar className="w-6 h-6 text-blue-600" />
+                <h3 className="font-semibold text-lg">فترة الاختبارات</h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-1">{activeExam.name}</p>
+              <p className="text-xs text-gray-500">
+                من {new Date(activeExam.start_date).toLocaleDateString('ar-EG')} 
+                {' إلى '}
+                {new Date(activeExam.end_date).toLocaleDateString('ar-EG')}
+              </p>
+            </div>
+          )}
+          
+          {activeSecondary && (
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center gap-3 mb-3">
+                <BookOpen className="w-6 h-6 text-green-600" />
+                <h3 className="font-semibold text-lg">التسجيل الثانوي</h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-1">{activeSecondary.name}</p>
+              <p className="text-xs text-gray-500">
+                من {new Date(activeSecondary.start_date).toLocaleDateString('ar-EG')} 
+                {' إلى '}
+                {new Date(activeSecondary.end_date).toLocaleDateString('ar-EG')}
+              </p>
+            </div>
+          )}
+          
+          {activeChampionship && (
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center gap-3 mb-3">
+                <Trophy className="w-6 h-6 text-yellow-600" />
+                <h3 className="font-semibold text-lg">البطولة</h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-1">{activeChampionship.name}</p>
+              <p className="text-xs text-gray-500">
+                من {new Date(activeChampionship.start_date).toLocaleDateString('ar-EG')} 
+                {' إلى '}
+                {new Date(activeChampionship.end_date).toLocaleDateString('ar-EG')}
+              </p>
+            </div>
+          )}
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border p-6 mb-8">
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+        <div className="bg-white rounded-xl shadow-sm border">
+          <div className="p-6 border-b">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">اللاعبين</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  عدد اللاعبين: {filteredPlayers.length}
+                </p>
+              </div>
+            </div>
+
+            <div className="relative">
+              <Search className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
                 type="text"
-                placeholder="ابحث عن لاعب بالاسم أو الرقم..."
+                placeholder="ابحث عن لاعب (الاسم، الحزام، الرقم)..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pr-12 pl-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white rounded-2xl shadow-sm border p-6 text-center">
-            <Users className="w-12 h-12 text-blue-600 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-gray-900 mb-2">إجمالي اللاعبين</h3>
-            <p className="text-3xl font-bold text-blue-600">{players.length}</p>
-          </div>
-          <div className="bg-white rounded-2xl shadow-sm border p-6 text-center">
-            <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-gray-900 mb-2">مسجلون في الاختبار</h3>
-            <p className="text-3xl font-bold text-green-600">{registeredPlayers.length}</p>
-            {activeExam && registeredPlayers.length > 0 && (
-              <button
-                onClick={downloadRegisteredPlayers}
-                className="mt-2 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-medium transition-colors mx-auto"
-              >
-                <Download className="w-4 h-4" />
-                تحميل الكشف
-              </button>
-            )}
-          </div>
-          <div className="bg-white rounded-2xl shadow-sm border p-6 text-center">
-            <Trophy className="w-12 h-12 text-yellow-600 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-gray-900 mb-2">البطولات</h3>
-            <p className="text-3xl font-bold text-yellow-600">
-              {championshipRegisteredPlayers.length} / {secondaryRegisteredPlayers.length}
-            </p>
-            {activeSecondaryRegistration && secondaryRegisteredPlayers.length > 0 && (
-              <button
-                onClick={downloadSecondaryRegisteredPlayers}
-                className="mt-2 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-medium transition-colors mx-auto"
-              >
-                <Download className="w-4 h-4" />
-                ثانوي
-              </button>
-            )}
-            {activeChampionship && championshipRegisteredPlayers.length > 0 && (
-              <button
-                onClick={downloadChampionshipRegisteredPlayers}
-                className="mt-2 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-medium transition-colors mx-auto"
-              >
-                <Download className="w-4 h-4" />
-                بطولة
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-gray-900">قائمة اللاعبين</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">الاسم</th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">الرقم</th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">العمر</th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">الحزام</th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">الاختبار</th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">التسجيل الثانوي</th>
-                  <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">البطولة</th>
-                </tr>
-              </thead>
-              <tbody>
+          <div className="p-6">
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            ) : filteredPlayers.length === 0 ? (
+              <div className="text-center py-12">
+                <UserCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-600">
+                  {searchTerm ? 'لم يتم العثور على نتائج' : 'لا يوجد لاعبين'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {filteredPlayers.map((player) => (
-                  <tr key={player.id} className="border-t border-gray-100 hover:bg-gray-50">
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{player.full_name}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{player.file_number}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{player.age}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{player.belt}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-1 flex-row-reverse">
-                        {activeExam && (
-                          player.registered ? (
-                            <button 
-                              onClick={() => unregisterExam(player)} 
-                              className="flex items-center gap-1 bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded-md text-xs transition-colors whitespace-nowrap"
-                              title="إلغاء تسجيل الاختبار"
-                            >
-                              <Minus className="w-3 h-3" />
-                              إلغاء اختبار
-                            </button>
-                          ) : (
-                            <button 
-                              onClick={() => registerExam(player)} 
-                              className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded-md text-xs transition-colors whitespace-nowrap"
-                              title="تسجيل الاختبار"
-                            >
-                              <Plus className="w-3 h-3" />
-                              تسجيل اختبار
-                            </button>
-                          )
-                        )}
-                        {activeSecondaryRegistration && (
-                          player.secondaryRegistered ? (
-                            <button 
-                              onClick={() => unregisterSecondary(player)} 
-                              className="flex items-center gap-1 bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded-md text-xs transition-colors whitespace-nowrap"
-                              title="إلغاء تسجيل ثانوي"
-                            >
-                              <Minus className="w-3 h-3" />
-                              إلغاء ثانوي
-                            </button>
-                          ) : (
-                            <button 
-                              onClick={() => registerSecondary(player)} 
-                              className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded-md text-xs transition-colors whitespace-nowrap"
-                              title="تسجيل ثانوي"
-                            >
-                              <Plus className="w-3 h-3" />
-                              تسجيل ثانوي
-                            </button>
-                          )
-                        )}
-                        {activeChampionship && (
-                          player.championshipRegistered ? (
-                            <button 
-                              onClick={() => unregisterChampionship(player)} 
-                              className="flex items-center gap-1 bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded-md text-xs transition-colors whitespace-nowrap"
-                              title="إلغاء تسجيل بطولة"
-                            >
-                              <Minus className="w-3 h-3" />
-                              إلغاء بطولة
-                            </button>
-                          ) : (
-                            <button 
-                              onClick={() => registerChampionship(player)} 
-                              className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded-md text-xs transition-colors whitespace-nowrap"
-                              title="تسجيل بطولة"
-                            >
-                              <Plus className="w-3 h-3" />
-                              تسجيل بطولة
-                            </button>
-                          )
-                        )}
+                  <div
+                    key={player.id}
+                    className="bg-white border border-gray-200 rounded-lg p-5 hover:shadow-md transition"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                          <UserCircle className="w-7 h-7 text-blue-600" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-gray-900">{player.full_name}</h3>
+                          {player.file_number && (
+                            <p className="text-xs text-gray-500">رقم: {player.file_number}</p>
+                          )}
+                        </div>
                       </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      {player.registered ? (
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-gray-400" />
+                    </div>
+
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-600">تاريخ الميلاد:</span>
+                        <span className="text-sm text-gray-900">
+                          {player.birth_date
+                            ? new Date(player.birth_date).toLocaleDateString('ar-EG')
+                            : '-'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-600">الحزام:</span>
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-medium ${getBeltColor(
+                            player.belt
+                          )}`}
+                        >
+                          {getBeltName(player.belt)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-3 space-y-2">
+                      {activeExam && (
+                        <button
+                          onClick={() => handleRegister(player.id, 'exam')}
+                          disabled={player.examRegistered || isRegistering(player.id, 'exam')}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition ${
+                            player.examRegistered
+                              ? 'bg-green-50 text-green-700 cursor-default'
+                              : 'bg-blue-50 hover:bg-blue-100 text-blue-700'
+                          }`}
+                        >
+                          <span className="text-sm font-medium">تسجيل اختبار</span>
+                          {isRegistering(player.id, 'exam') ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : player.examRegistered ? (
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <Calendar className="w-4 h-4" />
+                          )}
+                        </button>
                       )}
-                    </td>
-                    <td className="px-6 py-4">
-                      {player.secondaryRegistered ? (
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-gray-400" />
+
+                      {activeSecondary && (
+                        <button
+                          onClick={() => handleRegister(player.id, 'secondary')}
+                          disabled={player.secondaryRegistered || isRegistering(player.id, 'secondary')}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition ${
+                            player.secondaryRegistered
+                              ? 'bg-green-50 text-green-700 cursor-default'
+                              : 'bg-green-50 hover:bg-green-100 text-green-700'
+                          }`}
+                        >
+                          <span className="text-sm font-medium">تسجيل ثانوي</span>
+                          {isRegistering(player.id, 'secondary') ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : player.secondaryRegistered ? (
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <BookOpen className="w-4 h-4" />
+                          )}
+                        </button>
                       )}
-                    </td>
-                    <td className="px-6 py-4">
-                      {player.championshipRegistered ? (
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-gray-400" />
+
+                      {activeChampionship && (
+                        <button
+                          onClick={() => handleRegister(player.id, 'championship')}
+                          disabled={player.championshipRegistered || isRegistering(player.id, 'championship')}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition ${
+                            player.championshipRegistered
+                              ? 'bg-green-50 text-green-700 cursor-default'
+                              : 'bg-yellow-50 hover:bg-yellow-100 text-yellow-700'
+                          }`}
+                        >
+                          <span className="text-sm font-medium">تسجيل بطولة</span>
+                          {isRegistering(player.id, 'championship') ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : player.championshipRegistered ? (
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <Trophy className="w-4 h-4" />
+                          )}
+                        </button>
                       )}
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 ))}
-                {filteredPlayers.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
-                      لا توجد لاعبين {searchTerm && 'مطابقة للبحث'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
-};
-
+}
