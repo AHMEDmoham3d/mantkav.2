@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Player, Coach } from '../lib/supabase';
-import { LogOut, Search, UserCircle, Calendar, Trophy, BookOpen, CheckCircle, Loader2 } from 'lucide-react';
+import { LogOut, Search, UserCircle, Calendar, Trophy, BookOpen, CheckCircle, Loader2, XCircle } from 'lucide-react';
 
 interface ExtendedPlayer extends Player {
   examRegistered?: boolean;
@@ -39,6 +39,8 @@ export default function CoachDashboard() {
   const [loading, setLoading] = useState(true);
   const [registeringPlayer, setRegisteringPlayer] = useState<string | null>(null);
   const [registeringType, setRegisteringType] = useState<'exam' | 'secondary' | 'championship' | null>(null);
+  const [cancellingPlayer, setCancellingPlayer] = useState<string | null>(null);
+  const [cancellingType, setCancellingType] = useState<'exam' | 'secondary' | 'championship' | null>(null);
   
   // Active periods
   const [activeExam, setActiveExam] = useState<ExamPeriod | null>(null);
@@ -46,6 +48,9 @@ export default function CoachDashboard() {
   const [activeChampionship, setActiveChampionship] = useState<ChampionshipPeriod | null>(null);
   
   // Registration status
+  const [examRegistrations, setExamRegistrations] = useState<Set<string>>(new Set());
+  const [secondaryRegistrations, setSecondaryRegistrations] = useState<Set<string>>(new Set());
+  const [championshipRegistrations, setChampionshipRegistrations] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (user) {
@@ -128,6 +133,7 @@ export default function CoachDashboard() {
             .eq('coach_id', coachData.id);
           
           const examSet = new Set(examRegs?.map(r => r.player_id) || []);
+          setExamRegistrations(examSet);
           playersList.forEach(p => p.examRegistered = examSet.has(p.id));
         }
 
@@ -139,6 +145,7 @@ export default function CoachDashboard() {
             .eq('coach_id', coachData.id);
           
           const secondarySet = new Set(secondaryRegs?.map(r => r.player_id) || []);
+          setSecondaryRegistrations(secondarySet);
           playersList.forEach(p => p.secondaryRegistered = secondarySet.has(p.id));
         }
 
@@ -150,6 +157,7 @@ export default function CoachDashboard() {
             .eq('coach_id', coachData.id);
           
           const champSet = new Set(champRegs?.map(r => r.player_id) || []);
+          setChampionshipRegistrations(champSet);
           playersList.forEach(p => p.championshipRegistered = champSet.has(p.id));
         }
 
@@ -203,7 +211,7 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-
+        setExamRegistrations(prev => new Set([...prev, playerId]));
         setPlayers(prev => prev.map(p => 
           p.id === playerId ? { ...p, examRegistered: true } : p
         ));
@@ -226,7 +234,7 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-
+        setSecondaryRegistrations(prev => new Set([...prev, playerId]));
         setPlayers(prev => prev.map(p => 
           p.id === playerId ? { ...p, secondaryRegistered: true } : p
         ));
@@ -249,7 +257,7 @@ export default function CoachDashboard() {
 
         if (error) throw error;
         
-
+        setChampionshipRegistrations(prev => new Set([...prev, playerId]));
         setPlayers(prev => prev.map(p => 
           p.id === playerId ? { ...p, championshipRegistered: true } : p
         ));
@@ -264,6 +272,93 @@ export default function CoachDashboard() {
     } finally {
       setRegisteringPlayer(null);
       setRegisteringType(null);
+    }
+  };
+
+  const handleCancel = async (playerId: string, type: 'exam' | 'secondary' | 'championship') => {
+    if (!coach || !playerId) return;
+    
+    if (!confirm(`هل أنت متأكد من إلغاء تسجيل هذا اللاعب؟`)) return;
+
+    setCancellingPlayer(playerId);
+    setCancellingType(type);
+
+    try {
+      if (type === 'exam' && activeExam) {
+        const { error } = await supabase
+          .from('exam_registrations')
+          .delete()
+          .eq('exam_period_id', activeExam.id)
+          .eq('player_id', playerId)
+          .eq('coach_id', coach.id);
+
+        if (error) throw error;
+        
+        setExamRegistrations(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(playerId);
+          return newSet;
+        });
+        setPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, examRegistered: false } : p
+        ));
+        setFilteredPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, examRegistered: false } : p
+        ));
+        alert('تم إلغاء تسجيل اللاعب من الاختبار بنجاح');
+
+      } else if (type === 'secondary' && activeSecondary) {
+        const { error } = await supabase
+          .from('secondary_registrations')
+          .delete()
+          .eq('secondary_period_id', activeSecondary.id)
+          .eq('player_id', playerId)
+          .eq('coach_id', coach.id);
+
+        if (error) throw error;
+        
+        setSecondaryRegistrations(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(playerId);
+          return newSet;
+        });
+        setPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, secondaryRegistered: false } : p
+        ));
+        setFilteredPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, secondaryRegistered: false } : p
+        ));
+        alert('تم إلغاء تسجيل اللاعب من التسجيل الثانوي بنجاح');
+
+      } else if (type === 'championship' && activeChampionship) {
+        const { error } = await supabase
+          .from('tournament_registrations')
+          .delete()
+          .eq('tournament_period_id', activeChampionship.id)
+          .eq('player_id', playerId)
+          .eq('coach_id', coach.id);
+
+        if (error) throw error;
+        
+        setChampionshipRegistrations(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(playerId);
+          return newSet;
+        });
+        setPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, championshipRegistered: false } : p
+        ));
+        setFilteredPlayers(prev => prev.map(p => 
+          p.id === playerId ? { ...p, championshipRegistered: false } : p
+        ));
+        alert('تم إلغاء تسجيل اللاعب من البطولة بنجاح');
+      }
+    } catch (error) {
+      console.error('Error cancelling registration:', error);
+      alert('حدث خطأ أثناء إلغاء التسجيل');
+    } finally {
+      setCancellingPlayer(null);
+      setCancellingType(null);
     }
   };
 
@@ -297,6 +392,10 @@ export default function CoachDashboard() {
 
   const isRegistering = (playerId: string, type: 'exam' | 'secondary' | 'championship') => {
     return registeringPlayer === playerId && registeringType === type;
+  };
+
+  const isCancelling = (playerId: string, type: 'exam' | 'secondary' | 'championship') => {
+    return cancellingPlayer === playerId && cancellingType === type;
   };
 
   return (
@@ -458,66 +557,99 @@ export default function CoachDashboard() {
 
                     <div className="border-t pt-3 space-y-2">
                       {activeExam && (
-                        <button
-                          onClick={() => handleRegister(player.id, 'exam')}
-                          disabled={player.examRegistered || isRegistering(player.id, 'exam')}
-                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition ${
-                            player.examRegistered
-                              ? 'bg-green-50 text-green-700 cursor-default'
-                              : 'bg-blue-50 hover:bg-blue-100 text-blue-700'
-                          }`}
-                        >
-                          <span className="text-sm font-medium">تسجيل اختبار</span>
-                          {isRegistering(player.id, 'exam') ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : player.examRegistered ? (
-                            <CheckCircle className="w-4 h-4 text-green-600" />
+                        <div className="flex gap-2">
+                          {!player.examRegistered ? (
+                            <button
+                              onClick={() => handleRegister(player.id, 'exam')}
+                              disabled={isRegistering(player.id, 'exam')}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition disabled:opacity-50"
+                            >
+                              {isRegistering(player.id, 'exam') ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Calendar className="w-4 h-4" />
+                              )}
+                              <span className="text-sm font-medium">تسجيل اختبار</span>
+                            </button>
                           ) : (
-                            <Calendar className="w-4 h-4" />
+                            <button
+                              onClick={() => handleCancel(player.id, 'exam')}
+                              disabled={isCancelling(player.id, 'exam')}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition disabled:opacity-50"
+                            >
+                              {isCancelling(player.id, 'exam') ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <XCircle className="w-4 h-4" />
+                              )}
+                              <span className="text-sm font-medium">إلغاء الاختبار</span>
+                            </button>
                           )}
-                        </button>
+                        </div>
                       )}
 
                       {activeSecondary && (
-                        <button
-                          onClick={() => handleRegister(player.id, 'secondary')}
-                          disabled={player.secondaryRegistered || isRegistering(player.id, 'secondary')}
-                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition ${
-                            player.secondaryRegistered
-                              ? 'bg-green-50 text-green-700 cursor-default'
-                              : 'bg-green-50 hover:bg-green-100 text-green-700'
-                          }`}
-                        >
-                          <span className="text-sm font-medium">تسجيل ثانوي</span>
-                          {isRegistering(player.id, 'secondary') ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : player.secondaryRegistered ? (
-                            <CheckCircle className="w-4 h-4 text-green-600" />
+                        <div className="flex gap-2">
+                          {!player.secondaryRegistered ? (
+                            <button
+                              onClick={() => handleRegister(player.id, 'secondary')}
+                              disabled={isRegistering(player.id, 'secondary')}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg transition disabled:opacity-50"
+                            >
+                              {isRegistering(player.id, 'secondary') ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <BookOpen className="w-4 h-4" />
+                              )}
+                              <span className="text-sm font-medium">تسجيل ثانوي</span>
+                            </button>
                           ) : (
-                            <BookOpen className="w-4 h-4" />
+                            <button
+                              onClick={() => handleCancel(player.id, 'secondary')}
+                              disabled={isCancelling(player.id, 'secondary')}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition disabled:opacity-50"
+                            >
+                              {isCancelling(player.id, 'secondary') ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <XCircle className="w-4 h-4" />
+                              )}
+                              <span className="text-sm font-medium">إلغاء الثانوي</span>
+                            </button>
                           )}
-                        </button>
+                        </div>
                       )}
 
                       {activeChampionship && (
-                        <button
-                          onClick={() => handleRegister(player.id, 'championship')}
-                          disabled={player.championshipRegistered || isRegistering(player.id, 'championship')}
-                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition ${
-                            player.championshipRegistered
-                              ? 'bg-green-50 text-green-700 cursor-default'
-                              : 'bg-yellow-50 hover:bg-yellow-100 text-yellow-700'
-                          }`}
-                        >
-                          <span className="text-sm font-medium">تسجيل بطولة</span>
-                          {isRegistering(player.id, 'championship') ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : player.championshipRegistered ? (
-                            <CheckCircle className="w-4 h-4 text-green-600" />
+                        <div className="flex gap-2">
+                          {!player.championshipRegistered ? (
+                            <button
+                              onClick={() => handleRegister(player.id, 'championship')}
+                              disabled={isRegistering(player.id, 'championship')}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-lg transition disabled:opacity-50"
+                            >
+                              {isRegistering(player.id, 'championship') ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trophy className="w-4 h-4" />
+                              )}
+                              <span className="text-sm font-medium">تسجيل بطولة</span>
+                            </button>
                           ) : (
-                            <Trophy className="w-4 h-4" />
+                            <button
+                              onClick={() => handleCancel(player.id, 'championship')}
+                              disabled={isCancelling(player.id, 'championship')}
+                              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition disabled:opacity-50"
+                            >
+                              {isCancelling(player.id, 'championship') ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <XCircle className="w-4 h-4" />
+                              )}
+                              <span className="text-sm font-medium">إلغاء البطولة</span>
+                            </button>
                           )}
-                        </button>
+                        </div>
                       )}
                     </div>
                   </div>
