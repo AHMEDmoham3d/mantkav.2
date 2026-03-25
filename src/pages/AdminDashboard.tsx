@@ -165,10 +165,6 @@ export default function AdminDashboard() {
       setPeriodsForDropdown(data || []);
       if (data && data.length > 0 && !selectedPeriodId) {
         setSelectedPeriodId(data[0].id);
-        // Auto load registrations when a period is selected
-        setTimeout(() => {
-          loadRegistrations();
-        }, 100);
       }
     } catch (error) {
       console.error('Error loading periods:', error);
@@ -186,67 +182,113 @@ export default function AdminDashboard() {
       let registrations: any[] = [];
       
       if (selectedPeriodType === 'exam') {
-        const { data, error } = await supabase
+        // First get all registrations for this period
+        const { data: regData, error: regError } = await supabase
           .from('exam_registrations')
-          .select(`
-            *,
-            coach:coach_id (
-              id, 
-              full_name, 
-              email, 
-              organization:organization_id (
-                name
-              )
-            )
-          `)
+          .select('*')
           .eq('exam_period_id', selectedPeriodId);
         
-        if (error) {
-          console.error('Error fetching exam registrations:', error);
+        if (regError) {
+          console.error('Error fetching exam registrations:', regError);
         }
-        registrations = data || [];
+        
+        if (regData && regData.length > 0) {
+          // Get unique coach IDs
+          const coachIds = [...new Set(regData.map(r => r.coach_id))];
+          
+          // Fetch coach profiles with their organizations
+          const { data: coachesData } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, organization:organizations(name)')
+            .in('id', coachIds);
+          
+          const coachesMap = new Map();
+          coachesData?.forEach(coach => {
+            coachesMap.set(coach.id, {
+              id: coach.id,
+              full_name: coach.full_name,
+              email: coach.email,
+              organization: coach.organization
+            });
+          });
+          
+          // Combine registrations with coach data
+          registrations = regData.map(reg => ({
+            ...reg,
+            coach: coachesMap.get(reg.coach_id)
+          }));
+        }
+        
         console.log('Exam registrations loaded:', registrations.length);
       } else if (selectedPeriodType === 'secondary') {
-        const { data, error } = await supabase
+        const { data: regData, error: regError } = await supabase
           .from('secondary_registrations')
-          .select(`
-            *,
-            coach:coach_id (
-              id, 
-              full_name, 
-              email, 
-              organization:organization_id (
-                name
-              )
-            )
-          `)
+          .select('*')
           .eq('secondary_period_id', selectedPeriodId);
         
-        if (error) {
-          console.error('Error fetching secondary registrations:', error);
+        if (regError) {
+          console.error('Error fetching secondary registrations:', regError);
         }
-        registrations = data || [];
+        
+        if (regData && regData.length > 0) {
+          const coachIds = [...new Set(regData.map(r => r.coach_id))];
+          
+          const { data: coachesData } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, organization:organizations(name)')
+            .in('id', coachIds);
+          
+          const coachesMap = new Map();
+          coachesData?.forEach(coach => {
+            coachesMap.set(coach.id, {
+              id: coach.id,
+              full_name: coach.full_name,
+              email: coach.email,
+              organization: coach.organization
+            });
+          });
+          
+          registrations = regData.map(reg => ({
+            ...reg,
+            coach: coachesMap.get(reg.coach_id)
+          }));
+        }
+        
         console.log('Secondary registrations loaded:', registrations.length);
       } else {
-        const { data, error } = await supabase
+        const { data: regData, error: regError } = await supabase
           .from('tournament_registrations')
-          .select(`
-            *,
-            coach:coach_id (
-              id, 
-              full_name, 
-              email, 
-              organization:organization_id (
-                name
-              )
-            )
-          `)
+          .select('*')
           .eq('tournament_period_id', selectedPeriodId);
         
-        if (error) {
-          console.error('Error fetching championship registrations:', error);
+        if (regError) {
+          console.error('Error fetching championship registrations:', regError);
         }
-        registrations = data || [];
+        
+        if (regData && regData.length > 0) {
+          const coachIds = [...new Set(regData.map(r => r.coach_id))];
+          
+          const { data: coachesData } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, organization:organizations(name)')
+            .in('id', coachIds);
+          
+          const coachesMap = new Map();
+          coachesData?.forEach(coach => {
+            coachesMap.set(coach.id, {
+              id: coach.id,
+              full_name: coach.full_name,
+              email: coach.email,
+              organization: coach.organization
+            });
+          });
+          
+          registrations = regData.map(reg => ({
+            ...reg,
+            coach: coachesMap.get(reg.coach_id)
+          }));
+        }
+        
         console.log('Championship registrations loaded:', registrations.length);
       }
 
@@ -285,6 +327,8 @@ export default function AdminDashboard() {
       
       if (groups.length === 0) {
         console.log('No registrations found for this period');
+      } else {
+        console.log(`Loaded ${groups.length} coaches with players`);
       }
     } catch (error) {
       console.error('Error loading registrations:', error);
