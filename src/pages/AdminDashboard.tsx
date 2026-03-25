@@ -180,9 +180,10 @@ export default function AdminDashboard() {
     setViewLoading(true);
     try {
       let registrations: any[] = [];
+      let coachIds: string[] = [];
       
       if (selectedPeriodType === 'exam') {
-        // First get all registrations for this period
+        // Get all registrations for this period
         const { data: regData, error: regError } = await supabase
           .from('exam_registrations')
           .select('*')
@@ -192,34 +193,12 @@ export default function AdminDashboard() {
           console.error('Error fetching exam registrations:', regError);
         }
         
-        if (regData && regData.length > 0) {
-          // Get unique coach IDs
-          const coachIds = [...new Set(regData.map(r => r.coach_id))];
-          
-          // Fetch coach profiles with their organizations
-          const { data: coachesData } = await supabase
-            .from('profiles')
-            .select('id, full_name, email, organization:organizations(name)')
-            .in('id', coachIds);
-          
-          const coachesMap = new Map();
-          coachesData?.forEach(coach => {
-            coachesMap.set(coach.id, {
-              id: coach.id,
-              full_name: coach.full_name,
-              email: coach.email,
-              organization: coach.organization
-            });
-          });
-          
-          // Combine registrations with coach data
-          registrations = regData.map(reg => ({
-            ...reg,
-            coach: coachesMap.get(reg.coach_id)
-          }));
-        }
+        registrations = regData || [];
+        // Extract unique coach IDs
+        coachIds = [...new Set(registrations.map(r => r.coach_id).filter(Boolean))];
         
         console.log('Exam registrations loaded:', registrations.length);
+        console.log('Coach IDs:', coachIds);
       } else if (selectedPeriodType === 'secondary') {
         const { data: regData, error: regError } = await supabase
           .from('secondary_registrations')
@@ -230,29 +209,8 @@ export default function AdminDashboard() {
           console.error('Error fetching secondary registrations:', regError);
         }
         
-        if (regData && regData.length > 0) {
-          const coachIds = [...new Set(regData.map(r => r.coach_id))];
-          
-          const { data: coachesData } = await supabase
-            .from('profiles')
-            .select('id, full_name, email, organization:organizations(name)')
-            .in('id', coachIds);
-          
-          const coachesMap = new Map();
-          coachesData?.forEach(coach => {
-            coachesMap.set(coach.id, {
-              id: coach.id,
-              full_name: coach.full_name,
-              email: coach.email,
-              organization: coach.organization
-            });
-          });
-          
-          registrations = regData.map(reg => ({
-            ...reg,
-            coach: coachesMap.get(reg.coach_id)
-          }));
-        }
+        registrations = regData || [];
+        coachIds = [...new Set(registrations.map(r => r.coach_id).filter(Boolean))];
         
         console.log('Secondary registrations loaded:', registrations.length);
       } else {
@@ -265,70 +223,87 @@ export default function AdminDashboard() {
           console.error('Error fetching championship registrations:', regError);
         }
         
-        if (regData && regData.length > 0) {
-          const coachIds = [...new Set(regData.map(r => r.coach_id))];
-          
-          const { data: coachesData } = await supabase
-            .from('profiles')
-            .select('id, full_name, email, organization:organizations(name)')
-            .in('id', coachIds);
-          
-          const coachesMap = new Map();
-          coachesData?.forEach(coach => {
-            coachesMap.set(coach.id, {
-              id: coach.id,
-              full_name: coach.full_name,
-              email: coach.email,
-              organization: coach.organization
-            });
-          });
-          
-          registrations = regData.map(reg => ({
-            ...reg,
-            coach: coachesMap.get(reg.coach_id)
-          }));
-        }
+        registrations = regData || [];
+        coachIds = [...new Set(registrations.map(r => r.coach_id).filter(Boolean))];
         
         console.log('Championship registrations loaded:', registrations.length);
       }
 
-      // Group by coach
-      const groupsMap = new Map<string, CoachRegistrationGroup>();
-      
-      registrations.forEach(reg => {
-        const coachData = reg.coach;
-        if (!coachData) {
-          console.log('Registration without coach data:', reg);
-          return;
+      // If we have registrations, fetch coach profiles
+      if (registrations.length > 0 && coachIds.length > 0) {
+        // Fetch coach profiles
+        const { data: coachesData, error: coachesError } = await supabase
+          .from('profiles')
+          .select('id, full_name, email, organization_id')
+          .in('id', coachIds);
+        
+        if (coachesError) {
+          console.error('Error fetching coaches:', coachesError);
         }
         
-        const coachId = coachData.id;
-        if (!groupsMap.has(coachId)) {
-          groupsMap.set(coachId, {
-            coachId: coachId,
-            coachName: coachData.full_name || 'غير معروف',
-            coachEmail: coachData.email,
-            organizationName: coachData.organization?.name || 'غير محدد',
-            players: []
+        // Fetch organizations for these coaches
+        const orgIds = [...new Set(coachesData?.map(c => c.organization_id).filter(Boolean) || [])];
+        let orgsMap = new Map();
+        
+        if (orgIds.length > 0) {
+          const { data: orgsData } = await supabase
+            .from('organizations')
+            .select('id, name')
+            .in('id', orgIds);
+          
+          orgsData?.forEach(org => {
+            orgsMap.set(org.id, org.name);
           });
         }
         
-        groupsMap.get(coachId)!.players.push({
-          id: reg.player_id,
-          name: reg.player_name,
-          birth_date: reg.birth_date || '',
-          belt_level: reg.last_belt || ''
+        // Create a map of coach data
+        const coachesMap = new Map();
+        coachesData?.forEach(coach => {
+          coachesMap.set(coach.id, {
+            id: coach.id,
+            full_name: coach.full_name,
+            email: coach.email,
+            organizationName: orgsMap.get(coach.organization_id) || 'غير محدد'
+          });
         });
-      });
-      
-      const groups = Array.from(groupsMap.values());
-      setRegistrationsGroups(groups);
-      setExpandedCoaches(new Set());
-      
-      if (groups.length === 0) {
-        console.log('No registrations found for this period');
-      } else {
+        
+        // Group registrations by coach
+        const groupsMap = new Map<string, CoachRegistrationGroup>();
+        
+        registrations.forEach(reg => {
+          const coachData = coachesMap.get(reg.coach_id);
+          if (!coachData) {
+            console.log('Registration without coach data:', reg);
+            return;
+          }
+          
+          const coachId = coachData.id;
+          if (!groupsMap.has(coachId)) {
+            groupsMap.set(coachId, {
+              coachId: coachId,
+              coachName: coachData.full_name || 'غير معروف',
+              coachEmail: coachData.email,
+              organizationName: coachData.organizationName,
+              players: []
+            });
+          }
+          
+          groupsMap.get(coachId)!.players.push({
+            id: reg.player_id,
+            name: reg.player_name,
+            birth_date: reg.birth_date || '',
+            belt_level: reg.last_belt || ''
+          });
+        });
+        
+        const groups = Array.from(groupsMap.values());
+        setRegistrationsGroups(groups);
+        setExpandedCoaches(new Set());
+        
         console.log(`Loaded ${groups.length} coaches with players`);
+      } else {
+        setRegistrationsGroups([]);
+        console.log('No registrations found for this period');
       }
     } catch (error) {
       console.error('Error loading registrations:', error);
