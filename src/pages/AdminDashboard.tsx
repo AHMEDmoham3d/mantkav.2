@@ -182,10 +182,18 @@ export default function AdminDashboard() {
       let registrations: any[] = [];
       
       if (selectedPeriodType === 'exam') {
-        // Get all registrations for this period
+        // Get all registrations for this period with coach data directly using a join
         const { data: regData, error: regError } = await supabase
           .from('exam_registrations')
-          .select('*')
+          .select(`
+            *,
+            coach:coach_id (
+              id,
+              full_name,
+              email,
+              organization_id
+            )
+          `)
           .eq('exam_period_id', selectedPeriodId);
         
         if (regError) {
@@ -197,7 +205,15 @@ export default function AdminDashboard() {
       } else if (selectedPeriodType === 'secondary') {
         const { data: regData, error: regError } = await supabase
           .from('secondary_registrations')
-          .select('*')
+          .select(`
+            *,
+            coach:coach_id (
+              id,
+              full_name,
+              email,
+              organization_id
+            )
+          `)
           .eq('secondary_period_id', selectedPeriodId);
         
         if (regError) {
@@ -209,7 +225,15 @@ export default function AdminDashboard() {
       } else {
         const { data: regData, error: regError } = await supabase
           .from('tournament_registrations')
-          .select('*')
+          .select(`
+            *,
+            coach:coach_id (
+              id,
+              full_name,
+              email,
+              organization_id
+            )
+          `)
           .eq('tournament_period_id', selectedPeriodId);
         
         if (regError) {
@@ -220,48 +244,31 @@ export default function AdminDashboard() {
         console.log('Championship registrations loaded:', registrations.length);
       }
 
-      // If we have registrations, fetch coach profiles and organizations
+      // If we have registrations, process them
       if (registrations.length > 0) {
-        // Extract unique coach IDs
-        const coachIds = [...new Set(registrations.map(r => r.coach_id).filter(Boolean))];
-        console.log('Coach IDs:', coachIds);
+        // Get all unique organization IDs
+        const orgIds = [...new Set(registrations
+          .map(r => r.coach?.organization_id)
+          .filter(Boolean))];
         
-        // Create a map to store coach data
-        const coachesMap = new Map();
-        
-        // Fetch each coach individually to avoid the IN filter issue
-        for (const coachId of coachIds) {
-          const { data: coachData, error: coachError } = await supabase
-            .from('profiles')
-            .select('id, full_name, email, organization_id')
-            .eq('id', coachId)
-            .single();
+        // Fetch organization names
+        let orgsMap = new Map();
+        if (orgIds.length > 0) {
+          const { data: orgsData } = await supabase
+            .from('organizations')
+            .select('id, name')
+            .in('id', orgIds);
           
-          if (!coachError && coachData) {
-            coachesMap.set(coachId, {
-              id: coachData.id,
-              full_name: coachData.full_name,
-              email: coachData.email,
-              organization_id: coachData.organization_id
-            });
-          }
+          orgsData?.forEach(org => {
+            orgsMap.set(org.id, org.name);
+          });
         }
-        
-        // Fetch all organizations
-        const allOrganizations = await supabase
-          .from('organizations')
-          .select('id, name');
-        
-        const orgsMap = new Map();
-        allOrganizations.data?.forEach(org => {
-          orgsMap.set(org.id, org.name);
-        });
         
         // Group registrations by coach
         const groupsMap = new Map<string, CoachRegistrationGroup>();
         
         registrations.forEach(reg => {
-          const coachData = coachesMap.get(reg.coach_id);
+          const coachData = reg.coach;
           if (!coachData) {
             console.log('Registration without coach data:', reg);
             return;
