@@ -1,9 +1,13 @@
-# Fix TypeScript Errors in CoachDashboard.tsx
+# TODO: إصلاح عرض اللاعبين المسجلين في صفحة الأدمن
 
-## Steps:
-- [x] 1. Create this TODO.md
-- [x] 2. Edit src/pages/CoachDashboard.tsx to fix null string assignments in handleRegister inserts using ?? operator
-- [x] 3. Verify TypeScript errors are resolved
-- [x] 4. Mark complete and attempt_completion
+## الخطوات المتبقية:
+- [x] إنشاء TODO.md
+- [x] تطبيق التعديلات على loadRegistrations() في AdminDashboard.tsx
+  - تصفية coachIds للـ UUIDs الصالحة فقط
+  - تحديد الحد الأقصى 100 ID
+  - إصلاح استعلام profiles مع join للـ organizations
+  - إضافة error handling و logging
+- [ ] اختبار tab "عرض المسجلين" للاختبارات/التسجيل الثانوي/البطولات
+- [ ] التحقق من عدم وجود أخطاء 400 في console
+- [ ] إنهاء المهمة بـ attempt_completion
 
-Current status: Starting implementation...

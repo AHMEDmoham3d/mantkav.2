@@ -180,7 +180,6 @@ export default function AdminDashboard() {
     setViewLoading(true);
     try {
       let registrations: any[] = [];
-      let coachIds: string[] = [];
       
       if (selectedPeriodType === 'exam') {
         // Get all registrations for this period
@@ -194,11 +193,7 @@ export default function AdminDashboard() {
         }
         
         registrations = regData || [];
-        // Extract unique coach IDs
-        coachIds = [...new Set(registrations.map(r => r.coach_id).filter(Boolean))];
-        
         console.log('Exam registrations loaded:', registrations.length);
-        console.log('Coach IDs:', coachIds);
       } else if (selectedPeriodType === 'secondary') {
         const { data: regData, error: regError } = await supabase
           .from('secondary_registrations')
@@ -210,8 +205,6 @@ export default function AdminDashboard() {
         }
         
         registrations = regData || [];
-        coachIds = [...new Set(registrations.map(r => r.coach_id).filter(Boolean))];
-        
         console.log('Secondary registrations loaded:', registrations.length);
       } else {
         const { data: regData, error: regError } = await supabase
@@ -224,47 +217,44 @@ export default function AdminDashboard() {
         }
         
         registrations = regData || [];
-        coachIds = [...new Set(registrations.map(r => r.coach_id).filter(Boolean))];
-        
         console.log('Championship registrations loaded:', registrations.length);
       }
 
-      // If we have registrations, fetch coach profiles
-      if (registrations.length > 0 && coachIds.length > 0) {
-        // Fetch coach profiles
-        const { data: coachesData, error: coachesError } = await supabase
-          .from('profiles')
-          .select('id, full_name, email, organization_id')
-          .in('id', coachIds);
+      // If we have registrations, fetch coach profiles and organizations
+      if (registrations.length > 0) {
+        // Extract unique coach IDs
+        const coachIds = [...new Set(registrations.map(r => r.coach_id).filter(Boolean))];
+        console.log('Coach IDs:', coachIds);
         
-        if (coachesError) {
-          console.error('Error fetching coaches:', coachesError);
-        }
-        
-        // Fetch organizations for these coaches
-        const orgIds = [...new Set(coachesData?.map(c => c.organization_id).filter(Boolean) || [])];
-        let orgsMap = new Map();
-        
-        if (orgIds.length > 0) {
-          const { data: orgsData } = await supabase
-            .from('organizations')
-            .select('id, name')
-            .in('id', orgIds);
-          
-          orgsData?.forEach(org => {
-            orgsMap.set(org.id, org.name);
-          });
-        }
-        
-        // Create a map of coach data
+        // Create a map to store coach data
         const coachesMap = new Map();
-        coachesData?.forEach(coach => {
-          coachesMap.set(coach.id, {
-            id: coach.id,
-            full_name: coach.full_name,
-            email: coach.email,
-            organizationName: orgsMap.get(coach.organization_id) || 'غير محدد'
-          });
+        
+        // Fetch each coach individually to avoid the IN filter issue
+        for (const coachId of coachIds) {
+          const { data: coachData, error: coachError } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, organization_id')
+            .eq('id', coachId)
+            .single();
+          
+          if (!coachError && coachData) {
+            coachesMap.set(coachId, {
+              id: coachData.id,
+              full_name: coachData.full_name,
+              email: coachData.email,
+              organization_id: coachData.organization_id
+            });
+          }
+        }
+        
+        // Fetch all organizations
+        const allOrganizations = await supabase
+          .from('organizations')
+          .select('id, name');
+        
+        const orgsMap = new Map();
+        allOrganizations.data?.forEach(org => {
+          orgsMap.set(org.id, org.name);
         });
         
         // Group registrations by coach
@@ -283,7 +273,7 @@ export default function AdminDashboard() {
               coachId: coachId,
               coachName: coachData.full_name || 'غير معروف',
               coachEmail: coachData.email,
-              organizationName: coachData.organizationName,
+              organizationName: orgsMap.get(coachData.organization_id) || 'غير محدد',
               players: []
             });
           }
