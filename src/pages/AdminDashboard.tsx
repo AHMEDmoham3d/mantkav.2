@@ -16,7 +16,8 @@ import {
   Eye,
   Search,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  RefreshCw
 } from 'lucide-react';
 
 type TabType = 'organizations' | 'coaches' | 'players' | 'examPeriods' | 'secondaryPeriods' | 'championshipPeriods' | 'viewRegistrations';
@@ -90,7 +91,13 @@ export default function AdminDashboard() {
     if (activeTab === 'viewRegistrations') {
       loadPeriodsForDropdown();
     }
-  }, [activeTab]);
+  }, [activeTab, selectedPeriodType]);
+
+  useEffect(() => {
+    if (activeTab === 'viewRegistrations' && selectedPeriodId) {
+      loadRegistrations();
+    }
+  }, [selectedPeriodId, selectedPeriodType, activeTab]);
 
   const loadData = async () => {
     setLoading(true);
@@ -165,6 +172,9 @@ export default function AdminDashboard() {
       setPeriodsForDropdown(data || []);
       if (data && data.length > 0 && !selectedPeriodId) {
         setSelectedPeriodId(data[0].id);
+      } else if (data && data.length === 0) {
+        setSelectedPeriodId('');
+        setRegistrationsGroups([]);
       }
     } catch (error) {
       console.error('Error loading periods:', error);
@@ -173,7 +183,7 @@ export default function AdminDashboard() {
 
   const loadRegistrations = async () => {
     if (!selectedPeriodId) {
-      alert('الرجاء اختيار فترة أولاً');
+      setRegistrationsGroups([]);
       return;
     }
 
@@ -182,31 +192,58 @@ export default function AdminDashboard() {
       let registrations: any[] = [];
       
       if (selectedPeriodType === 'exam') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('exam_registrations')
           .select(`
             *,
-            coach:coach_id (id, full_name, email, organization:organization_id (name))
+            coach:coach_id (
+              id, 
+              full_name, 
+              email,
+              organization:organization_id (
+                name
+              )
+            )
           `)
           .eq('exam_period_id', selectedPeriodId);
+        
+        if (error) throw error;
         registrations = data || [];
       } else if (selectedPeriodType === 'secondary') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('secondary_registrations')
           .select(`
             *,
-            coach:coach_id (id, full_name, email, organization:organization_id (name))
+            coach:coach_id (
+              id, 
+              full_name, 
+              email,
+              organization:organization_id (
+                name
+              )
+            )
           `)
           .eq('secondary_period_id', selectedPeriodId);
+        
+        if (error) throw error;
         registrations = data || [];
       } else {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('tournament_registrations')
           .select(`
             *,
-            coach:coach_id (id, full_name, email, organization:organization_id (name))
+            coach:coach_id (
+              id, 
+              full_name, 
+              email,
+              organization:organization_id (
+                name
+              )
+            )
           `)
           .eq('tournament_period_id', selectedPeriodId);
+        
+        if (error) throw error;
         registrations = data || [];
       }
 
@@ -241,16 +278,11 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error('Error loading registrations:', error);
       alert('حدث خطأ أثناء تحميل البيانات');
+      setRegistrationsGroups([]);
     } finally {
       setViewLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (activeTab === 'viewRegistrations' && selectedPeriodId) {
-      loadRegistrations();
-    }
-  }, [selectedPeriodId, selectedPeriodType, activeTab]);
 
   const handleDelete = async (id: string, table: string) => {
     if (!confirm('هل أنت متأكد من الحذف؟')) return;
@@ -278,10 +310,21 @@ export default function AdminDashboard() {
   };
 
   const filteredCoachGroups = registrationsGroups.filter(group =>
-    group.coachName.toLowerCase().includes(searchCoachTerm.toLowerCase()) ||
-    group.organizationName.toLowerCase().includes(searchCoachTerm.toLowerCase()) ||
+    group.coachName?.toLowerCase().includes(searchCoachTerm.toLowerCase()) ||
+    group.organizationName?.toLowerCase().includes(searchCoachTerm.toLowerCase()) ||
     (group.coachEmail && group.coachEmail.toLowerCase().includes(searchCoachTerm.toLowerCase()))
   );
+
+  const handlePeriodTypeChange = (type: 'exam' | 'secondary' | 'championship') => {
+    setSelectedPeriodType(type);
+    setSelectedPeriodId('');
+    setRegistrationsGroups([]);
+    setPeriodsForDropdown([]);
+  };
+
+  const handlePeriodSelect = (periodId: string) => {
+    setSelectedPeriodId(periodId);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
@@ -491,11 +534,7 @@ export default function AdminDashboard() {
                         <label className="block text-sm font-medium text-gray-700 mb-2">نوع التسجيل</label>
                         <select
                           value={selectedPeriodType}
-                          onChange={(e) => {
-                            setSelectedPeriodType(e.target.value as any);
-                            setSelectedPeriodId('');
-                            setRegistrationsGroups([]);
-                          }}
+                          onChange={(e) => handlePeriodTypeChange(e.target.value as any)}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                         >
                           <option value="exam">اختبارات</option>
@@ -507,7 +546,7 @@ export default function AdminDashboard() {
                         <label className="block text-sm font-medium text-gray-700 mb-2">اختر الفترة</label>
                         <select
                           value={selectedPeriodId}
-                          onChange={(e) => setSelectedPeriodId(e.target.value)}
+                          onChange={(e) => handlePeriodSelect(e.target.value)}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                         >
                           <option value="">اختر فترة</option>
@@ -520,9 +559,10 @@ export default function AdminDashboard() {
                       </div>
                       <button
                         onClick={loadRegistrations}
-                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition flex items-center gap-2"
                       >
-                        عرض
+                        <RefreshCw className="w-4 h-4" />
+                        <span>عرض</span>
                       </button>
                     </div>
 
@@ -647,7 +687,7 @@ function OrganizationsTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">النوع</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+        </tr>
       </thead>
       <tbody>
         {organizations.map((org) => (
@@ -781,12 +821,10 @@ function PlayersTable({
 
 function PeriodsTable({
   periods,
-  // type,
   onDelete,
   onEdit,
 }: {
   periods: any[];
-  // type: string;
   onDelete: (id: string) => void;
   onEdit: (id: string) => void;
 }) {
