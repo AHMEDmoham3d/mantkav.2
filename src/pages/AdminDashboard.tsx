@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, Organization, Coach, Player } from '../lib/supabase';
+import { supabase, Organization, Coach, Player, ExamPeriod, SecondaryRegistrationPeriod, ChampionshipPeriod } from '../lib/supabase';
 import {
   LogOut,
   Building2,
@@ -10,48 +10,22 @@ import {
   Trash2,
   Edit2,
   X,
-  Calendar,
   Trophy,
-  BookOpen,
+  ClipboardList,
   Eye,
-  Search,
-  Download
+  FileText,
+  Search
 } from 'lucide-react';
 
 type TabType = 'organizations' | 'coaches' | 'players' | 'examPeriods' | 'secondaryPeriods' | 'championshipPeriods';
 type PeriodTabType = 'exam' | 'secondary' | 'championship';
 
-interface ExamPeriod {
-  id: string;
-  name: string;
-  start_date: string;
-  end_date: string;
-  created_at: string;
-}
-
-interface SecondaryPeriod {
-  id: string;
-  name: string;
-  start_date: string;
-  end_date: string;
-  created_at: string;
-}
-
-interface ChampionshipPeriod {
-  id: string;
-  name: string;
-  start_date: string;
-  end_date: string;
-  created_at: string;
-}
-
-interface Registration {
+type Registration = {
   id: string;
   player_name: string;
   birth_date: string | null;
   last_belt: string | null;
   player?: {
-    id: string;
     full_name: string;
     birth_date: string | null;
     belt: string | null;
@@ -59,14 +33,13 @@ interface Registration {
   coach?: {
     id: string;
     full_name: string;
-    email?: string;
     organization_id: string;
     organization?: {
       id: string;
       name: string;
     };
   };
-}
+};
 
 export default function AdminDashboard() {
   const { signOut } = useAuth();
@@ -75,7 +48,7 @@ export default function AdminDashboard() {
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [examPeriods, setExamPeriods] = useState<ExamPeriod[]>([]);
-  const [secondaryPeriods, setSecondaryPeriods] = useState<SecondaryPeriod[]>([]);
+  const [secondaryPeriods, setSecondaryPeriods] = useState<SecondaryRegistrationPeriod[]>([]);
   const [championshipPeriods, setChampionshipPeriods] = useState<ChampionshipPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -103,52 +76,45 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       if (activeTab === 'organizations') {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('organizations')
           .select('*')
           .order('created_at', { ascending: false });
-        if (error) throw error;
         setOrganizations(data || []);
       } else if (activeTab === 'coaches') {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('profiles')
           .select('*, organization:organizations(*)')
           .eq('role', 'coach')
           .order('created_at', { ascending: false });
-        if (error) throw error;
         setCoaches(data || []);
       } else if (activeTab === 'players') {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('players')
           .select('*, coach:profiles(*)')
           .order('created_at', { ascending: false });
-        if (error) throw error;
         setPlayers(data || []);
       } else if (activeTab === 'examPeriods') {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('exam_periods')
           .select('*')
           .order('start_date', { ascending: false });
-        if (error) throw error;
         setExamPeriods(data || []);
       } else if (activeTab === 'secondaryPeriods') {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('secondary_registration_periods')
           .select('*')
           .order('start_date', { ascending: false });
-        if (error) throw error;
         setSecondaryPeriods(data || []);
       } else if (activeTab === 'championshipPeriods') {
-        const { data, error } = await supabase
-          .from('tournament_periods')
+        const { data } = await supabase
+          .from('championship_periods')
           .select('*')
           .order('start_date', { ascending: false });
-        if (error) throw error;
         setChampionshipPeriods(data || []);
       }
     } catch (error) {
       console.error('Error loading data:', error);
-      alert('حدث خطأ أثناء تحميل البيانات');
     } finally {
       setLoading(false);
     }
@@ -160,8 +126,7 @@ export default function AdminDashboard() {
     try {
       const { error } = await supabase.from(table).delete().eq('id', id);
       if (error) throw error;
-      await loadData();
-      alert('تم الحذف بنجاح');
+      loadData();
     } catch (error) {
       console.error('Error deleting:', error);
       alert('حدث خطأ أثناء الحذف');
@@ -172,7 +137,7 @@ export default function AdminDashboard() {
     let table = '';
     if (type === 'exam') table = 'exam_periods';
     else if (type === 'secondary') table = 'secondary_registration_periods';
-    else table = 'tournament_periods';
+    else table = 'championship_periods';
 
     await handleDelete(id, table);
   };
@@ -191,64 +156,33 @@ export default function AdminDashboard() {
   };
 
   const viewRegistrations = async (type: PeriodTabType, periodId: string, periodName: string) => {
-    setLoading(true);
-    let registrations: Registration[] = [];
+    let registrations = [];
+    let table = '';
 
-    try {
-      if (type === 'exam') {
-        const { data, error } = await supabase
-          .from('exam_registrations')
-          .select(`
-            *,
-            player:players(*),
-            coach:profiles!exam_registrations_coach_id_fkey(
-              *,
-              organization:organizations(*)
-            )
-          `)
-          .eq('exam_period_id', periodId);
-        
-        if (error) throw error;
-        registrations = data || [];
-      } else if (type === 'secondary') {
-        const { data, error } = await supabase
-          .from('secondary_registrations')
-          .select(`
-            *,
-            player:players(*),
-            coach:profiles!secondary_registrations_coach_id_fkey(
-              *,
-              organization:organizations(*)
-            )
-          `)
-          .eq('secondary_period_id', periodId);
-        
-        if (error) throw error;
-        registrations = data || [];
-      } else {
-        const { data, error } = await supabase
-          .from('tournament_registrations')
-          .select(`
-            *,
-            player:players(*),
-            coach:profiles!tournament_registrations_coach_id_fkey(
-              *,
-              organization:organizations(*)
-            )
-          `)
-          .eq('tournament_period_id', periodId);
-        
-        if (error) throw error;
-        registrations = data || [];
-      }
-
-      setRegistrationsView({ type, periodId, periodName, registrations });
-    } catch (error) {
-      console.error('Error loading registrations:', error);
-      alert('حدث خطأ أثناء تحميل المسجلين');
-    } finally {
-      setLoading(false);
+    if (type === 'exam') {
+      table = 'exam_registrations';
+      const { data } = await supabase
+        .from(table)
+        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
+        .eq('exam_period_id', periodId);
+      registrations = data || [];
+    } else if (type === 'secondary') {
+      table = 'secondary_registrations';
+      const { data } = await supabase
+        .from(table)
+        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
+        .eq('secondary_period_id', periodId);
+      registrations = data || [];
+    } else {
+      table = 'championship_registrations';
+      const { data } = await supabase
+        .from(table)
+        .select('*, player:players(*), coach:profiles(*, organization:organizations(*))')
+        .eq('championship_period_id', periodId);
+      registrations = data || [];
     }
+
+    setRegistrationsView({ type, periodId, periodName, registrations });
   };
 
   const getPeriodStatus = (startDate: string, endDate: string) => {
@@ -327,7 +261,7 @@ export default function AdminDashboard() {
                     : 'border-transparent text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <Calendar className="w-5 h-5" />
+                <ClipboardList className="w-5 h-5" />
                 <span>فترات الاختبارات</span>
               </button>
               <button
@@ -338,7 +272,7 @@ export default function AdminDashboard() {
                     : 'border-transparent text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <BookOpen className="w-5 h-5" />
+                <FileText className="w-5 h-5" />
                 <span>التسجيل الثانوي</span>
               </button>
               <button
@@ -494,7 +428,6 @@ export default function AdminDashboard() {
         <RegistrationsModal
           registrations={registrationsView.registrations}
           periodName={registrationsView.periodName}
-          periodType={registrationsView.type}
           onClose={() => setRegistrationsView(null)}
         />
       )}
@@ -523,6 +456,7 @@ export default function AdminDashboard() {
   );
 }
 
+// Existing table components (OrganizationsTable, CoachesTable, PlayersTable) remain the same
 function OrganizationsTable({
   organizations,
   onDelete,
@@ -538,7 +472,6 @@ function OrganizationsTable({
         <tr className="border-b bg-gray-50">
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">النوع</th>
-          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الإضافة</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
          </tr>
       </thead>
@@ -548,9 +481,6 @@ function OrganizationsTable({
             <td className="px-6 py-4 text-sm text-gray-900">{org.name}</td>
             <td className="px-6 py-4 text-sm text-gray-600">
               {org.type === 'club' ? 'نادي' : 'مركز شباب'}
-            </td>
-            <td className="px-6 py-4 text-sm text-gray-600">
-              {org.created_at ? new Date(org.created_at).toLocaleDateString('ar-EG') : '-'}
             </td>
             <td className="px-6 py-4">
               <div className="flex gap-2">
@@ -589,22 +519,16 @@ function CoachesTable({
       <thead>
         <tr className="border-b bg-gray-50">
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
-          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">البريد الإلكتروني</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">المؤسسة</th>
-          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ التسجيل</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-        </tr>
+         </tr>
       </thead>
       <tbody>
         {coaches.map((coach) => (
           <tr key={coach.id} className="border-b hover:bg-gray-50">
             <td className="px-6 py-4 text-sm text-gray-900">{coach.full_name}</td>
-            <td className="px-6 py-4 text-sm text-gray-600">{coach.email}</td>
             <td className="px-6 py-4 text-sm text-gray-600">
               {coach.organization?.name}
-            </td>
-            <td className="px-6 py-4 text-sm text-gray-600">
-              {coach.created_at ? new Date(coach.created_at).toLocaleDateString('ar-EG') : '-'}
             </td>
             <td className="px-6 py-4">
               <div className="flex gap-2">
@@ -646,9 +570,8 @@ function PlayersTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">المدرب</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">مستوى الحزام</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الهاتف</th>
-          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الميلاد</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-        </tr>
+         </tr>
       </thead>
       <tbody>
         {players.map((player) => (
@@ -656,10 +579,7 @@ function PlayersTable({
             <td className="px-6 py-4 text-sm text-gray-900">{player.full_name}</td>
             <td className="px-6 py-4 text-sm text-gray-600">{player.coach?.full_name}</td>
             <td className="px-6 py-4 text-sm text-gray-600">{player.belt}</td>
-            <td className="px-6 py-4 text-sm text-gray-600">{player.phone || '-'}</td>
-            <td className="px-6 py-4 text-sm text-gray-600">
-              {player.birth_date ? new Date(player.birth_date).toLocaleDateString('ar-EG') : '-'}
-            </td>
+            <td className="px-6 py-4 text-sm text-gray-600">{player.phone}</td>
             <td className="px-6 py-4">
               <div className="flex gap-2">
                 <button
@@ -683,6 +603,7 @@ function PlayersTable({
   );
 }
 
+// PeriodsTable component
 function PeriodsTable({
   periods,
   type,
@@ -759,21 +680,20 @@ function PeriodsTable({
   );
 }
 
+// Updated Registrations Modal with search filter and organization name
 function RegistrationsModal({
   registrations,
   periodName,
-  periodType,
   onClose,
 }: {
   registrations: any[];
   periodName: string;
-  periodType: PeriodTabType;
   onClose: () => void;
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   
   // Group registrations by coach
-  const groupedByCoach: Record<string, any[]> = registrations.reduce((acc: Record<string, any[]>, reg: any) => {
+  const groupedByCoach: Record<string, Registration[]> = registrations.reduce((acc: Record<string, Registration[]>, reg: Registration) => {
     const coachName = reg.coach?.full_name || 'مدرب غير معروف';
     if (!acc[coachName]) acc[coachName] = [];
     acc[coachName].push(reg);
@@ -786,49 +706,6 @@ function RegistrationsModal({
     return coachName.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
-  const exportToExcel = () => {
-    if (registrations.length === 0) return;
-
-    try {
-      const exportData: any[] = [];
-      
-      registrations.forEach(reg => {
-        exportData.push({
-          'المدرب': reg.coach?.full_name || 'غير معروف',
-          'المؤسسة': reg.coach?.organization?.name || 'غير معروف',
-          'اللاعب': reg.player?.full_name || reg.player_name,
-          'تاريخ الميلاد': reg.birth_date || reg.player?.birth_date || '',
-          'الحزام': reg.last_belt || reg.player?.belt || ''
-        });
-      });
-
-      const headers = Object.keys(exportData[0]);
-      const csvRows = [
-        headers.join(','),
-        ...exportData.map(row => 
-          headers.map(header => {
-            const value = row[header];
-            return typeof value === 'string' && value.includes(',') ? `"${value}"` : value;
-          }).join(',')
-        )
-      ];
-      
-      const csvString = csvRows.join('\n');
-      const blob = new Blob(["\uFEFF" + csvString], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `${periodType}_${periodName}_${new Date().toISOString()}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error exporting data:', error);
-      alert('حدث خطأ أثناء التصدير');
-    }
-  };
-
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
@@ -836,23 +713,12 @@ function RegistrationsModal({
           <h3 className="text-lg font-semibold text-gray-900">
             المسجلين في {periodName}
           </h3>
-          <div className="flex gap-2">
-            {registrations.length > 0 && (
-              <button
-                onClick={exportToExcel}
-                className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition"
-              >
-                <Download className="w-4 h-4" />
-                <span className="text-sm">تصدير</span>
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         <div className="p-6">
@@ -873,6 +739,7 @@ function RegistrationsModal({
           {/* Coaches List */}
           <div className="space-y-6">
             {filteredCoaches.map(([coachName, coachRegistrations]) => {
+              // Get organization name from the first registration of this coach
               const organizationName = coachRegistrations[0]?.coach?.organization?.name || 'لا يوجد';
               
               return (
@@ -901,14 +768,10 @@ function RegistrationsModal({
                         </tr>
                       </thead>
                       <tbody>
-                        {coachRegistrations.map((reg: any) => (
+                        {coachRegistrations.map((reg: Registration) => (
                           <tr key={reg.id} className="border-t hover:bg-gray-50">
                             <td className="px-4 py-3 text-sm text-gray-900">{reg.player?.full_name || reg.player_name}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">
-                              {reg.birth_date || reg.player?.birth_date 
-                                ? new Date(reg.birth_date || reg.player?.birth_date).toLocaleDateString('ar-EG') 
-                                : '-'}
-                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{reg.birth_date || reg.player?.birth_date || '-'}</td>
                             <td className="px-4 py-3 text-sm text-gray-600">{reg.last_belt || reg.player?.belt || '-'}</td>
                           </tr>
                         ))}
@@ -930,6 +793,7 @@ function RegistrationsModal({
   );
 }
 
+// FormModal component
 function FormModal({
   type,
   periodType,
@@ -1025,7 +889,7 @@ function FormModal({
     let table = '';
     if (periodType === 'exam') table = 'exam_periods';
     else if (periodType === 'secondary') table = 'secondary_registration_periods';
-    else table = 'tournament_periods';
+    else table = 'championship_periods';
 
     const data = {
       name: formData.name,
@@ -1051,11 +915,9 @@ function FormModal({
     };
 
     if (editingId) {
-      const { error } = await supabase.from('organizations').update(data).eq('id', editingId);
-      if (error) throw error;
+      await supabase.from('organizations').update(data).eq('id', editingId);
     } else {
-      const { error } = await supabase.from('organizations').insert([data]);
-      if (error) throw error;
+      await supabase.from('organizations').insert([data]);
     }
   };
 
@@ -1069,19 +931,17 @@ function FormModal({
       if (authError) throw authError;
       if (!authData.user) throw new Error('فشل إنشاء المستخدم');
 
-      const { error } = await supabase.from('profiles').insert([{
+      await supabase.from('profiles').insert([{
         id: authData.user.id,
         full_name: formData.full_name,
         role: 'coach',
         organization_id: formData.organization_id,
       }]);
-      if (error) throw error;
     } else {
-      const { error } = await supabase.from('profiles').update({
+      await supabase.from('profiles').update({
         full_name: formData.full_name,
         organization_id: formData.organization_id,
       }).eq('id', editingId);
-      if (error) throw error;
     }
   };
 
@@ -1092,15 +952,12 @@ function FormModal({
       birth_date: formData.birth_date,
       belt: formData.belt,
       phone: formData.phone,
-      file_number: formData.file_number ? parseInt(formData.file_number) : null,
     };
 
     if (editingId) {
-      const { error } = await supabase.from('players').update(data).eq('id', editingId);
-      if (error) throw error;
+      await supabase.from('players').update(data).eq('id', editingId);
     } else {
-      const { error } = await supabase.from('players').insert([data]);
-      if (error) throw error;
+      await supabase.from('players').insert([data]);
     }
   };
 
@@ -1294,17 +1151,6 @@ function FormModal({
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  الرقم
-                </label>
-                <input
-                  type="text"
-                  value={formData.file_number || ''}
-                  onChange={(e) => setFormData({ ...formData, file_number: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
                   تاريخ الميلاد
                 </label>
                 <input
@@ -1325,11 +1171,16 @@ function FormModal({
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="white">أبيض</option>
-                  <option value="yellow">أصفر</option>
-                  <option value="orange">برتقالي</option>
-                  <option value="green">أخضر</option>
-                  <option value="blue">أزرق</option>
-                  <option value="brown">بني</option>
+                  <option value="yellow 10">اصفر 10</option>
+                  <option value="yellow 9">اصفر 9</option>
+                  <option value="orange 8">برتقالى 8</option>
+                  <option value="orange 7">برتقالى 7</option>
+                  <option value="green 6">اخضر 6</option>
+                  <option value="green 5">اخضر 5</option>
+                  <option value="blue 4">ازرق 4</option>
+                  <option value="blue 3">ازرق 3</option>
+                  <option value="brown 2">بنى 2</option>
+                  <option value="brown 1">بنى 1</option>
                   <option value="black">أسود</option>
                 </select>
               </div>
