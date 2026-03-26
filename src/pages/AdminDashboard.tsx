@@ -17,7 +17,9 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
-  RefreshCw
+  RefreshCw,
+  Download,
+  FileText
 } from 'lucide-react';
 
 type TabType = 'organizations' | 'coaches' | 'players' | 'examPeriods' | 'secondaryPeriods' | 'championshipPeriods' | 'viewRegistrations';
@@ -82,6 +84,7 @@ export default function AdminDashboard() {
   const [searchCoachTerm, setSearchCoachTerm] = useState('');
   const [expandedCoaches, setExpandedCoaches] = useState<Set<string>>(new Set());
   const [periodsForDropdown, setPeriodsForDropdown] = useState<any[]>([]);
+  const [exportLoading, setExportLoading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -103,45 +106,52 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       if (activeTab === 'organizations') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('organizations')
           .select('*')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         setOrganizations(data || []);
       } else if (activeTab === 'coaches') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('profiles')
           .select('*, organization:organizations(*)')
           .eq('role', 'coach')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         setCoaches(data || []);
       } else if (activeTab === 'players') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('players')
           .select('*, coach:profiles(*)')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         setPlayers(data || []);
       } else if (activeTab === 'examPeriods') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('exam_periods')
           .select('*')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         setExamPeriods(data || []);
       } else if (activeTab === 'secondaryPeriods') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('secondary_registration_periods')
           .select('*')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         setSecondaryPeriods(data || []);
       } else if (activeTab === 'championshipPeriods') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('tournament_periods')
           .select('*')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         setChampionshipPeriods(data || []);
       }
     } catch (error) {
       console.error('Error loading data:', error);
+      alert('حدث خطأ أثناء تحميل البيانات');
     } finally {
       setLoading(false);
     }
@@ -151,22 +161,25 @@ export default function AdminDashboard() {
     try {
       let data;
       if (selectedPeriodType === 'exam') {
-        const { data: examData } = await supabase
+        const { data: examData, error } = await supabase
           .from('exam_periods')
           .select('id, name, start_date, end_date')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         data = examData;
       } else if (selectedPeriodType === 'secondary') {
-        const { data: secondaryData } = await supabase
+        const { data: secondaryData, error } = await supabase
           .from('secondary_registration_periods')
           .select('id, name, start_date, end_date')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         data = secondaryData;
       } else {
-        const { data: champData } = await supabase
+        const { data: champData, error } = await supabase
           .from('tournament_periods')
           .select('id, name, start_date, end_date')
           .order('created_at', { ascending: false });
+        if (error) throw error;
         data = champData;
       }
       setPeriodsForDropdown(data || []);
@@ -178,6 +191,7 @@ export default function AdminDashboard() {
       }
     } catch (error) {
       console.error('Error loading periods:', error);
+      alert('حدث خطأ أثناء تحميل الفترات');
     }
   };
 
@@ -290,7 +304,8 @@ export default function AdminDashboard() {
     try {
       const { error } = await supabase.from(table).delete().eq('id', id);
       if (error) throw error;
-      loadData();
+      await loadData();
+      alert('تم الحذف بنجاح');
     } catch (error) {
       console.error('Error deleting:', error);
       alert('حدث خطأ أثناء الحذف');
@@ -324,6 +339,65 @@ export default function AdminDashboard() {
 
   const handlePeriodSelect = (periodId: string) => {
     setSelectedPeriodId(periodId);
+  };
+
+  const exportToExcel = () => {
+    if (registrationsGroups.length === 0) {
+      alert('لا توجد بيانات للتصدير');
+      return;
+    }
+
+    setExportLoading(true);
+    try {
+      // Prepare data for export
+      const exportData: any[] = [];
+      
+      registrationsGroups.forEach(group => {
+        group.players.forEach(player => {
+          exportData.push({
+            'المدرب': group.coachName,
+            'البريد الإلكتروني': group.coachEmail || '',
+            'المؤسسة': group.organizationName,
+            'اللاعب': player.name,
+            'تاريخ الميلاد': player.birth_date ? new Date(player.birth_date).toLocaleDateString('ar-EG') : '',
+            'الحزام': player.belt_level
+          });
+        });
+      });
+
+      // Create CSV
+      const headers = Object.keys(exportData[0]);
+      const csvRows = [
+        headers.join(','),
+        ...exportData.map(row => 
+          headers.map(header => {
+            const value = row[header];
+            return typeof value === 'string' && value.includes(',') ? `"${value}"` : value;
+          }).join(',')
+        )
+      ];
+      
+      const csvString = csvRows.join('\n');
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `registrations_${selectedPeriodType}_${new Date().toISOString()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      alert('حدث خطأ أثناء التصدير');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const getPeriodName = () => {
+    const period = periodsForDropdown.find(p => p.id === selectedPeriodId);
+    return period ? period.name : '';
   };
 
   return (
@@ -564,7 +638,29 @@ export default function AdminDashboard() {
                         <RefreshCw className="w-4 h-4" />
                         <span>عرض</span>
                       </button>
+                      {registrationsGroups.length > 0 && (
+                        <button
+                          onClick={exportToExcel}
+                          disabled={exportLoading}
+                          className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition flex items-center gap-2"
+                        >
+                          {exportLoading ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
+                          <span>تصدير</span>
+                        </button>
+                      )}
                     </div>
+
+                    {selectedPeriodId && periodsForDropdown.length > 0 && (
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <p className="text-sm text-blue-800">
+                          <strong>الفترة المحددة:</strong> {getPeriodName()}
+                        </p>
+                      </div>
+                    )}
 
                     {viewLoading ? (
                       <div className="text-center py-12">
@@ -615,7 +711,7 @@ export default function AdminDashboard() {
                                         <th className="px-4 py-2 text-right text-sm font-semibold">اللاعب</th>
                                         <th className="px-4 py-2 text-right text-sm font-semibold">تاريخ الميلاد</th>
                                         <th className="px-4 py-2 text-right text-sm font-semibold">الحزام</th>
-                                      </tr>
+                                       </tr>
                                     </thead>
                                     <tbody>
                                       {group.players.map(player => (
@@ -641,7 +737,18 @@ export default function AdminDashboard() {
                       </>
                     ) : (
                       <div className="text-center py-12 text-gray-500">
-                        {selectedPeriodId ? 'لا يوجد لاعبين مسجلين في هذه الفترة' : 'الرجاء اختيار فترة لعرض المسجلين'}
+                        {selectedPeriodId ? (
+                          <div className="space-y-2">
+                            <FileText className="w-16 h-16 text-gray-300 mx-auto" />
+                            <p>لا يوجد لاعبين مسجلين في هذه الفترة</p>
+                            <p className="text-sm">يمكن للمدربين تسجيل لاعبيهم من خلال لوحة التحكم الخاصة بهم</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <Eye className="w-16 h-16 text-gray-300 mx-auto" />
+                            <p>الرجاء اختيار فترة لعرض المسجلين</p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -686,6 +793,7 @@ function OrganizationsTable({
         <tr className="border-b bg-gray-50">
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">النوع</th>
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الإضافة</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
         </tr>
       </thead>
@@ -695,6 +803,9 @@ function OrganizationsTable({
             <td className="px-6 py-4 text-sm text-gray-900">{org.name}</td>
             <td className="px-6 py-4 text-sm text-gray-600">
               {org.type === 'club' ? 'نادي' : 'مركز شباب'}
+            </td>
+            <td className="px-6 py-4 text-sm text-gray-600">
+              {org.created_at ? new Date(org.created_at).toLocaleDateString('ar-EG') : '-'}
             </td>
             <td className="px-6 py-4">
               <div className="flex gap-2">
@@ -735,6 +846,7 @@ function CoachesTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">البريد الإلكتروني</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">المؤسسة</th>
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ التسجيل</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
         </tr>
       </thead>
@@ -745,6 +857,9 @@ function CoachesTable({
             <td className="px-6 py-4 text-sm text-gray-600">{coach.email}</td>
             <td className="px-6 py-4 text-sm text-gray-600">
               {coach.organization?.name}
+            </td>
+            <td className="px-6 py-4 text-sm text-gray-600">
+              {coach.created_at ? new Date(coach.created_at).toLocaleDateString('ar-EG') : '-'}
             </td>
             <td className="px-6 py-4">
               <div className="flex gap-2">
@@ -786,6 +901,7 @@ function PlayersTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">المدرب</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">مستوى الحزام</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الهاتف</th>
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الميلاد</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
         </tr>
       </thead>
@@ -796,6 +912,9 @@ function PlayersTable({
             <td className="px-6 py-4 text-sm text-gray-600">{player.coach?.full_name}</td>
             <td className="px-6 py-4 text-sm text-gray-600">{player.belt}</td>
             <td className="px-6 py-4 text-sm text-gray-600">{player.phone || '-'}</td>
+            <td className="px-6 py-4 text-sm text-gray-600">
+              {player.birth_date ? new Date(player.birth_date).toLocaleDateString('ar-EG') : '-'}
+            </td>
             <td className="px-6 py-4">
               <div className="flex gap-2">
                 <button
@@ -835,37 +954,62 @@ function PeriodsTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ البدء</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الانتهاء</th>
+          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الحالة</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
         </tr>
       </thead>
       <tbody>
-        {periods.map((period) => (
-          <tr key={period.id} className="border-b hover:bg-gray-50">
-            <td className="px-6 py-4 text-sm text-gray-900">{period.name}</td>
-            <td className="px-6 py-4 text-sm text-gray-600">
-              {new Date(period.start_date).toLocaleDateString('ar-EG')}
-            </td>
-            <td className="px-6 py-4 text-sm text-gray-600">
-              {new Date(period.end_date).toLocaleDateString('ar-EG')}
-            </td>
-            <td className="px-6 py-4">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onEdit(period.id)}
-                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                >
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => onDelete(period.id)}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </td>
-          </tr>
-        ))}
+        {periods.map((period) => {
+          const today = new Date();
+          const startDate = new Date(period.start_date);
+          const endDate = new Date(period.end_date);
+          let status = '';
+          let statusColor = '';
+          
+          if (today < startDate) {
+            status = 'قادمة';
+            statusColor = 'text-yellow-600 bg-yellow-50';
+          } else if (today > endDate) {
+            status = 'منتهية';
+            statusColor = 'text-gray-600 bg-gray-50';
+          } else {
+            status = 'فعالة';
+            statusColor = 'text-green-600 bg-green-50';
+          }
+          
+          return (
+            <tr key={period.id} className="border-b hover:bg-gray-50">
+              <td className="px-6 py-4 text-sm text-gray-900">{period.name}</td>
+              <td className="px-6 py-4 text-sm text-gray-600">
+                {new Date(period.start_date).toLocaleDateString('ar-EG')}
+              </td>
+              <td className="px-6 py-4 text-sm text-gray-600">
+                {new Date(period.end_date).toLocaleDateString('ar-EG')}
+              </td>
+              <td className="px-6 py-4">
+                <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColor}`}>
+                  {status}
+                </span>
+              </td>
+              <td className="px-6 py-4">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onEdit(period.id)}
+                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => onDelete(period.id)}
+                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -959,9 +1103,11 @@ function FormModal({
     };
 
     if (editingId) {
-      await supabase.from('organizations').update(data).eq('id', editingId);
+      const { error } = await supabase.from('organizations').update(data).eq('id', editingId);
+      if (error) throw error;
     } else {
-      await supabase.from('organizations').insert([data]);
+      const { error } = await supabase.from('organizations').insert([data]);
+      if (error) throw error;
     }
   };
 
@@ -975,17 +1121,21 @@ function FormModal({
       if (authError) throw authError;
       if (!authData.user) throw new Error('فشل إنشاء المستخدم');
 
-      await supabase.from('profiles').insert([{
+      const { error } = await supabase.from('profiles').insert([{
         id: authData.user.id,
         full_name: formData.full_name,
         role: 'coach',
         organization_id: formData.organization_id,
       }]);
+      
+      if (error) throw error;
     } else {
-      await supabase.from('profiles').update({
+      const { error } = await supabase.from('profiles').update({
         organization_id: formData.organization_id,
         full_name: formData.full_name,
       }).eq('id', editingId);
+      
+      if (error) throw error;
     }
   };
 
@@ -1000,9 +1150,11 @@ function FormModal({
     };
 
     if (editingId) {
-      await supabase.from('players').update(data).eq('id', editingId);
+      const { error } = await supabase.from('players').update(data).eq('id', editingId);
+      if (error) throw error;
     } else {
-      await supabase.from('players').insert([data]);
+      const { error } = await supabase.from('players').insert([data]);
+      if (error) throw error;
     }
   };
 
@@ -1014,9 +1166,11 @@ function FormModal({
     };
 
     if (editingId) {
-      await supabase.from(table).update(data).eq('id', editingId);
+      const { error } = await supabase.from(table).update(data).eq('id', editingId);
+      if (error) throw error;
     } else {
-      await supabase.from(table).insert([data]);
+      const { error } = await supabase.from(table).insert([data]);
+      if (error) throw error;
     }
   };
 
