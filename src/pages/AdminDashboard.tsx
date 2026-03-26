@@ -90,7 +90,7 @@ export default function AdminDashboard() {
     if (activeTab === 'viewRegistrations') {
       loadPeriodsForDropdown();
     }
-  }, [activeTab, selectedPeriodType]);
+  }, [activeTab]);
 
   const loadData = async () => {
     setLoading(true);
@@ -182,126 +182,62 @@ export default function AdminDashboard() {
       let registrations: any[] = [];
       
       if (selectedPeriodType === 'exam') {
-        // Get all registrations for this period with coach data directly using a join
-        const { data: regData, error: regError } = await supabase
+        const { data } = await supabase
           .from('exam_registrations')
           .select(`
             *,
-            coach:coach_id (
-              id,
-              full_name,
-              email,
-              organization_id
-            )
+            coach:coach_id (id, full_name, email, organization:organization_id (name))
           `)
           .eq('exam_period_id', selectedPeriodId);
-        
-        if (regError) {
-          console.error('Error fetching exam registrations:', regError);
-        }
-        
-        registrations = regData || [];
-        console.log('Exam registrations loaded:', registrations.length);
+        registrations = data || [];
       } else if (selectedPeriodType === 'secondary') {
-        const { data: regData, error: regError } = await supabase
+        const { data } = await supabase
           .from('secondary_registrations')
           .select(`
             *,
-            coach:coach_id (
-              id,
-              full_name,
-              email,
-              organization_id
-            )
+            coach:coach_id (id, full_name, email, organization:organization_id (name))
           `)
           .eq('secondary_period_id', selectedPeriodId);
-        
-        if (regError) {
-          console.error('Error fetching secondary registrations:', regError);
-        }
-        
-        registrations = regData || [];
-        console.log('Secondary registrations loaded:', registrations.length);
+        registrations = data || [];
       } else {
-        const { data: regData, error: regError } = await supabase
+        const { data } = await supabase
           .from('tournament_registrations')
           .select(`
             *,
-            coach:coach_id (
-              id,
-              full_name,
-              email,
-              organization_id
-            )
+            coach:coach_id (id, full_name, email, organization:organization_id (name))
           `)
           .eq('tournament_period_id', selectedPeriodId);
-        
-        if (regError) {
-          console.error('Error fetching championship registrations:', regError);
-        }
-        
-        registrations = regData || [];
-        console.log('Championship registrations loaded:', registrations.length);
+        registrations = data || [];
       }
 
-      // If we have registrations, process them
-      if (registrations.length > 0) {
-        // Get all unique organization IDs
-        const orgIds = [...new Set(registrations
-          .map(r => r.coach?.organization_id)
-          .filter(Boolean))];
+      // Group by coach
+      const groupsMap = new Map<string, CoachRegistrationGroup>();
+      
+      registrations.forEach(reg => {
+        const coachData = reg.coach;
+        if (!coachData) return;
         
-        // Fetch organization names
-        let orgsMap = new Map();
-        if (orgIds.length > 0) {
-          const { data: orgsData } = await supabase
-            .from('organizations')
-            .select('id, name')
-            .in('id', orgIds);
-          
-          orgsData?.forEach(org => {
-            orgsMap.set(org.id, org.name);
+        const coachId = coachData.id;
+        if (!groupsMap.has(coachId)) {
+          groupsMap.set(coachId, {
+            coachId: coachId,
+            coachName: coachData.full_name,
+            coachEmail: coachData.email,
+            organizationName: coachData.organization?.name || 'غير محدد',
+            players: []
           });
         }
         
-        // Group registrations by coach
-        const groupsMap = new Map<string, CoachRegistrationGroup>();
-        
-        registrations.forEach(reg => {
-          const coachData = reg.coach;
-          if (!coachData) {
-            console.log('Registration without coach data:', reg);
-            return;
-          }
-          
-          const coachId = coachData.id;
-          if (!groupsMap.has(coachId)) {
-            groupsMap.set(coachId, {
-              coachId: coachId,
-              coachName: coachData.full_name || 'غير معروف',
-              coachEmail: coachData.email,
-              organizationName: orgsMap.get(coachData.organization_id) || 'غير محدد',
-              players: []
-            });
-          }
-          
-          groupsMap.get(coachId)!.players.push({
-            id: reg.player_id,
-            name: reg.player_name,
-            birth_date: reg.birth_date || '',
-            belt_level: reg.last_belt || ''
-          });
+        groupsMap.get(coachId)!.players.push({
+          id: reg.player_id,
+          name: reg.player_name,
+          birth_date: reg.birth_date || '',
+          belt_level: reg.last_belt || ''
         });
-        
-        const groups = Array.from(groupsMap.values());
-        setRegistrationsGroups(groups);
-        setExpandedCoaches(new Set());
-        
-        console.log(`Loaded ${groups.length} coaches with players`);
-      } else {
-        setRegistrationsGroups([]);
-        console.log('No registrations found for this period');
-      }
+      });
+      
+      setRegistrationsGroups(Array.from(groupsMap.values()));
+      setExpandedCoaches(new Set());
     } catch (error) {
       console.error('Error loading registrations:', error);
       alert('حدث خطأ أثناء تحميل البيانات');
@@ -521,7 +457,6 @@ export default function AdminDashboard() {
                 {activeTab === 'examPeriods' && (
                   <PeriodsTable
                     periods={examPeriods}
-                    type="exam"
                     onDelete={(id) => handleDelete(id, 'exam_periods')}
                     onEdit={(id) => {
                       setEditingId(id);
@@ -532,7 +467,6 @@ export default function AdminDashboard() {
                 {activeTab === 'secondaryPeriods' && (
                   <PeriodsTable
                     periods={secondaryPeriods}
-                    type="secondary"
                     onDelete={(id) => handleDelete(id, 'secondary_registration_periods')}
                     onEdit={(id) => {
                       setEditingId(id);
@@ -543,7 +477,6 @@ export default function AdminDashboard() {
                 {activeTab === 'championshipPeriods' && (
                   <PeriodsTable
                     periods={championshipPeriods}
-                    type="championship"
                     onDelete={(id) => handleDelete(id, 'tournament_periods')}
                     onEdit={(id) => {
                       setEditingId(id);
@@ -562,7 +495,6 @@ export default function AdminDashboard() {
                             setSelectedPeriodType(e.target.value as any);
                             setSelectedPeriodId('');
                             setRegistrationsGroups([]);
-                            setPeriodsForDropdown([]);
                           }}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                         >
@@ -575,10 +507,7 @@ export default function AdminDashboard() {
                         <label className="block text-sm font-medium text-gray-700 mb-2">اختر الفترة</label>
                         <select
                           value={selectedPeriodId}
-                          onChange={(e) => {
-                            setSelectedPeriodId(e.target.value);
-                            setRegistrationsGroups([]);
-                          }}
+                          onChange={(e) => setSelectedPeriodId(e.target.value)}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                         >
                           <option value="">اختر فترة</option>
@@ -591,8 +520,7 @@ export default function AdminDashboard() {
                       </div>
                       <button
                         onClick={loadRegistrations}
-                        disabled={!selectedPeriodId}
-                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
                       >
                         عرض
                       </button>
@@ -601,7 +529,6 @@ export default function AdminDashboard() {
                     {viewLoading ? (
                       <div className="text-center py-12">
                         <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                        <p className="mt-4 text-gray-600">جاري تحميل البيانات...</p>
                       </div>
                     ) : registrationsGroups.length > 0 ? (
                       <>
@@ -648,7 +575,7 @@ export default function AdminDashboard() {
                                         <th className="px-4 py-2 text-right text-sm font-semibold">اللاعب</th>
                                         <th className="px-4 py-2 text-right text-sm font-semibold">تاريخ الميلاد</th>
                                         <th className="px-4 py-2 text-right text-sm font-semibold">الحزام</th>
-                                       </tr>
+                                      </tr>
                                     </thead>
                                     <tbody>
                                       {group.players.map(player => (
@@ -720,7 +647,7 @@ function OrganizationsTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">النوع</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-        </tr>
+         </tr>
       </thead>
       <tbody>
         {organizations.map((org) => (
@@ -854,16 +781,15 @@ function PlayersTable({
 
 function PeriodsTable({
   periods,
-  type: _type,
+  // type,
   onDelete,
   onEdit,
 }: {
   periods: any[];
-  type: string;
+  // type: string;
   onDelete: (id: string) => void;
   onEdit: (id: string) => void;
 }) {
-
   return (
     <table className="w-full">
       <thead>
