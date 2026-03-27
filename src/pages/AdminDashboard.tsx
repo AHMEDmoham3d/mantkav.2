@@ -14,7 +14,8 @@ import {
   ClipboardList,
   Eye,
   FileText,
-  Search
+  Search,
+  CheckCircle
 } from 'lucide-react';
 
 type TabType = 'organizations' | 'coaches' | 'players' | 'examPeriods' | 'secondaryPeriods' | 'championshipPeriods';
@@ -26,6 +27,7 @@ type Registration = {
   birth_date: string | null;
   last_belt: string | null;
   player?: {
+    id: string;
     full_name: string;
     birth_date: string | null;
     belt: string | null;
@@ -191,6 +193,110 @@ export default function AdminDashboard() {
     if (today > endDate) return { text: 'منتهي', className: 'bg-gray-100 text-gray-800' };
     return { text: 'نشط', className: 'bg-green-100 text-green-800' };
   };
+
+  // --- Belt Promotion Logic ---
+  const beltHierarchy: string[] = [
+    'white',
+    'yellow 10', 'yellow 9',
+    'orange 8', 'orange 7',
+    'green 6', 'green 5',
+    'blue 4', 'blue 3',
+    'brown 2', 'brown 1',
+    'black 1', 'black 2', 'black 3', 'black 4', 'black 5', 'black 6', 'black 7', 'black 8', 'black 9', 'black 10'
+  ];
+
+  const getNextBelt = (currentBelt: string | null): string | null => {
+    if (!currentBelt) return beltHierarchy[0]; // Default to white if null
+    const currentIndex = beltHierarchy.indexOf(currentBelt);
+    if (currentIndex === -1 || currentIndex === beltHierarchy.length - 1) {
+      // Belt not found or already at max
+      return null;
+    }
+    return beltHierarchy[currentIndex + 1];
+  };
+
+  const confirmPromotion = async (coachId: string, coachName: string, periodId: string, periodName: string) => {
+    if (!confirm(`هل أنت متأكد من ترقية جميع لاعبين المدرب "${coachName}" في فترة "${periodName}"؟`)) {
+      return;
+    }
+
+    // 1. Fetch all players registered by this coach for this specific exam period
+    const { data: registrations, error: fetchError } = await supabase
+      .from('exam_registrations')
+      .select('*, player:players(*)')
+      .eq('exam_period_id', periodId)
+      .eq('coach_id', coachId);
+
+    if (fetchError) {
+      console.error('Error fetching registrations:', fetchError);
+      alert('حدث خطأ أثناء جلب بيانات اللاعبين');
+      return;
+    }
+
+    if (!registrations || registrations.length === 0) {
+      alert('لا يوجد لاعبين مسجلين لهذا المدرب في هذه الفترة');
+      return;
+    }
+
+    // 2. Prepare updates and promotion records
+    const playerUpdates: { id: string; newBelt: string; oldBelt: string }[] = [];
+    const promotionsToInsert: any[] = [];
+
+    for (const reg of registrations) {
+      const player = reg.player;
+      if (!player) continue;
+
+      const currentBelt = player.belt;
+      const nextBelt = getNextBelt(currentBelt);
+
+      if (nextBelt && currentBelt !== nextBelt) {
+        playerUpdates.push({
+          id: player.id,
+          newBelt: nextBelt,
+          oldBelt: currentBelt || 'white'
+        });
+        promotionsToInsert.push({
+          player_id: player.id,
+          from_belt: currentBelt,
+          to_belt: nextBelt,
+          promoted_by: coachId,
+          promotion_date: new Date().toISOString().split('T')[0],
+          exam_period_id: periodId,
+          notes: `تم الترقية بواسطة الإدارة بناءً على تسجيل فترة ${periodName}`
+        });
+      }
+    }
+
+    if (playerUpdates.length === 0) {
+      alert('لا يوجد لاعبين قابلين للترقية من بين المسجلين');
+      return;
+    }
+
+    // 3. Update player belts in a transaction-like manner (using promises)
+    const updatePromises = playerUpdates.map(update =>
+      supabase.from('players').update({ belt: update.newBelt }).eq('id', update.id)
+    );
+
+    const promotionPromise = supabase.from('belt_promotions').insert(promotionsToInsert);
+
+    const results = await Promise.all([...updatePromises, promotionPromise]);
+
+    // Check for errors
+    const updateErrors = results.slice(0, -1).filter(r => r.error);
+    const promotionError = results[results.length - 1].error;
+
+    if (updateErrors.length > 0 || promotionError) {
+      console.error('Promotion errors:', { updateErrors, promotionError });
+      alert('حدث خطأ أثناء ترقية اللاعبين. يرجى المحاولة مرة أخرى.');
+    } else {
+      alert(`تم ترقية ${playerUpdates.length} لاعب بنجاح!`);
+      // Refresh the registrations view to show updated belts
+      if (registrationsView) {
+        viewRegistrations(registrationsView.type, registrationsView.periodId, registrationsView.periodName);
+      }
+    }
+  };
+  // --- End Belt Promotion Logic ---
 
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
@@ -423,12 +529,15 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Registrations View Modal */}
+      {/* Registrations View Modal - UPDATED with Confirm Promotion Button */}
       {registrationsView && (
         <RegistrationsModal
           registrations={registrationsView.registrations}
           periodName={registrationsView.periodName}
+          periodId={registrationsView.periodId}
+          periodType={registrationsView.type}
           onClose={() => setRegistrationsView(null)}
+          onConfirmPromotion={confirmPromotion}
         />
       )}
 
@@ -473,7 +582,7 @@ function OrganizationsTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">النوع</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+        </tr>
       </thead>
       <tbody>
         {organizations.map((org) => (
@@ -521,7 +630,7 @@ function CoachesTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الاسم</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">المؤسسة</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+        </tr>
       </thead>
       <tbody>
         {coaches.map((coach) => (
@@ -571,7 +680,7 @@ function PlayersTable({
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">مستوى الحزام</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الهاتف</th>
           <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">الإجراءات</th>
-         </tr>
+        </tr>
       </thead>
       <tbody>
         {players.map((player) => (
@@ -680,17 +789,24 @@ function PeriodsTable({
   );
 }
 
-// Updated Registrations Modal with search filter and organization name
+// Updated Registrations Modal with search filter, organization name, and confirm promotion button
 function RegistrationsModal({
   registrations,
   periodName,
+  periodId,
+  periodType,
   onClose,
+  onConfirmPromotion,
 }: {
   registrations: any[];
   periodName: string;
+  periodId: string;
+  periodType: PeriodTabType;
   onClose: () => void;
+  onConfirmPromotion: (coachId: string, coachName: string, periodId: string, periodName: string) => Promise<void>;
 }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [promotingCoachId, setPromotingCoachId] = useState<string | null>(null);
   
   // Group registrations by coach
   const groupedByCoach: Record<string, Registration[]> = registrations.reduce((acc: Record<string, Registration[]>, reg: Registration) => {
@@ -705,6 +821,18 @@ function RegistrationsModal({
     if (!searchTerm.trim()) return true;
     return coachName.toLowerCase().includes(searchTerm.toLowerCase());
   });
+
+  const handlePromotionClick = async (coachId: string, coachName: string) => {
+    setPromotingCoachId(coachId);
+    try {
+      await onConfirmPromotion(coachId, coachName, periodId, periodName);
+    } finally {
+      setPromotingCoachId(null);
+    }
+  };
+
+  // Only show the confirm button for exam periods
+  const showConfirmButton = periodType === 'exam';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -739,7 +867,8 @@ function RegistrationsModal({
           {/* Coaches List */}
           <div className="space-y-6">
             {filteredCoaches.map(([coachName, coachRegistrations]) => {
-              // Get organization name from the first registration of this coach
+              // Get organization name and coach ID from the first registration
+              const coachId = coachRegistrations[0]?.coach?.id;
               const organizationName = coachRegistrations[0]?.coach?.organization?.name || 'لا يوجد';
               
               return (
@@ -753,9 +882,25 @@ function RegistrationsModal({
                           {organizationName}
                         </p>
                       </div>
-                      <p className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full inline-block">
-                        عدد اللاعبين: {coachRegistrations.length}
-                      </p>
+                      <div className="flex items-center gap-4">
+                        <p className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full">
+                          عدد اللاعبين: {coachRegistrations.length}
+                        </p>
+                        {showConfirmButton && coachId && (
+                          <button
+                            onClick={() => handlePromotionClick(coachId, coachName)}
+                            disabled={promotingCoachId === coachId}
+                            className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50"
+                          >
+                            {promotingCoachId === coachId ? (
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            ) : (
+                              <CheckCircle className="w-4 h-4" />
+                            )}
+                            <span className="text-sm whitespace-nowrap">تأكيد الترقية</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="overflow-x-auto">
@@ -764,17 +909,25 @@ function RegistrationsModal({
                         <tr>
                           <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">اللاعب</th>
                           <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">تاريخ الميلاد</th>
-                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام الحالي</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">الحزام الجديد</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {coachRegistrations.map((reg: Registration) => (
-                          <tr key={reg.id} className="border-t hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm text-gray-900">{reg.player?.full_name || reg.player_name}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{reg.birth_date || reg.player?.birth_date || '-'}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{reg.last_belt || reg.player?.belt || '-'}</td>
-                          </tr>
-                        ))}
+                        {coachRegistrations.map((reg: Registration) => {
+                          const currentBelt = reg.player?.belt || reg.last_belt || 'أبيض';
+                          const nextBelt = getNextBeltForDisplay(currentBelt);
+                          return (
+                            <tr key={reg.id} className="border-t hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm text-gray-900">{reg.player?.full_name || reg.player_name}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{reg.birth_date || reg.player?.birth_date || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{currentBelt}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-green-600">
+                                {nextBelt || 'أقصى درجة'}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -793,7 +946,27 @@ function RegistrationsModal({
   );
 }
 
-// FormModal component
+// Helper function for display (same logic as getNextBelt but returns formatted string)
+function getNextBeltForDisplay(currentBelt: string | null): string | null {
+  const beltHierarchy: string[] = [
+    'white',
+    'yellow 10', 'yellow 9',
+    'orange 8', 'orange 7',
+    'green 6', 'green 5',
+    'blue 4', 'blue 3',
+    'brown 2', 'brown 1',
+    'black 1', 'black 2', 'black 3', 'black 4', 'black 5', 'black 6', 'black 7', 'black 8', 'black 9', 'black 10'
+  ];
+  
+  if (!currentBelt) return beltHierarchy[0];
+  const currentIndex = beltHierarchy.indexOf(currentBelt);
+  if (currentIndex === -1 || currentIndex === beltHierarchy.length - 1) {
+    return null;
+  }
+  return beltHierarchy[currentIndex + 1];
+}
+
+// FormModal component (unchanged)
 function FormModal({
   type,
   periodType,
