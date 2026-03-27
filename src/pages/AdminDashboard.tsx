@@ -205,13 +205,44 @@ export default function AdminDashboard() {
     'black 1', 'black 2', 'black 3', 'black 4', 'black 5', 'black 6', 'black 7', 'black 8', 'black 9', 'black 10'
   ];
 
+  // Helper function to normalize belt strings for comparison
+  const normalizeBelt = (belt: string | null): string => {
+    if (!belt) return 'white';
+    // Convert to lowercase and trim
+    let normalized = belt.toLowerCase().trim();
+    // Handle Arabic numbers if they exist
+    normalized = normalized.replace(/١/g, '1').replace(/٢/g, '2').replace(/٣/g, '3')
+      .replace(/٤/g, '4').replace(/٥/g, '5').replace(/٦/g, '6')
+      .replace(/٧/g, '7').replace(/٨/g, '8').replace(/٩/g, '9').replace(/٠/g, '0');
+    return normalized;
+  };
+
   const getNextBelt = (currentBelt: string | null): string | null => {
-    if (!currentBelt) return beltHierarchy[0]; // Default to white if null
-    const currentIndex = beltHierarchy.indexOf(currentBelt);
-    if (currentIndex === -1 || currentIndex === beltHierarchy.length - 1) {
-      // Belt not found or already at max
+    const normalizedCurrent = normalizeBelt(currentBelt);
+    
+    // Special handling for black belt without number
+    if (normalizedCurrent === 'black') {
+      return 'black 1';
+    }
+    
+    const currentIndex = beltHierarchy.findIndex(belt => normalizeBelt(belt) === normalizedCurrent);
+    
+    if (currentIndex === -1) {
+      console.log('Belt not found in hierarchy:', currentBelt);
+      // Try to find by partial match
+      if (normalizedCurrent.includes('yellow')) return 'yellow 9';
+      if (normalizedCurrent.includes('orange')) return 'orange 7';
+      if (normalizedCurrent.includes('green')) return 'green 5';
+      if (normalizedCurrent.includes('blue')) return 'blue 3';
+      if (normalizedCurrent.includes('brown')) return 'brown 1';
+      if (normalizedCurrent.includes('black')) return 'black 1';
       return null;
     }
+    
+    if (currentIndex === beltHierarchy.length - 1) {
+      return null; // Already at max belt
+    }
+    
     return beltHierarchy[currentIndex + 1];
   };
 
@@ -239,21 +270,27 @@ export default function AdminDashboard() {
     }
 
     // 2. Prepare updates and promotion records
-    const playerUpdates: { id: string; newBelt: string; oldBelt: string }[] = [];
+    const playerUpdates: { id: string; newBelt: string; oldBelt: string; playerName: string }[] = [];
     const promotionsToInsert: any[] = [];
 
     for (const reg of registrations) {
       const player = reg.player;
-      if (!player) continue;
+      if (!player) {
+        console.log('Player not found for registration:', reg);
+        continue;
+      }
 
       const currentBelt = player.belt;
       const nextBelt = getNextBelt(currentBelt);
+
+      console.log(`Player: ${player.full_name}, Current belt: ${currentBelt}, Next belt: ${nextBelt}`);
 
       if (nextBelt && currentBelt !== nextBelt) {
         playerUpdates.push({
           id: player.id,
           newBelt: nextBelt,
-          oldBelt: currentBelt || 'white'
+          oldBelt: currentBelt || 'white',
+          playerName: player.full_name
         });
         promotionsToInsert.push({
           player_id: player.id,
@@ -264,36 +301,56 @@ export default function AdminDashboard() {
           exam_period_id: periodId,
           notes: `تم الترقية بواسطة الإدارة بناءً على تسجيل فترة ${periodName}`
         });
+      } else {
+        console.log(`Player ${player.full_name} cannot be promoted from ${currentBelt}`);
       }
     }
 
     if (playerUpdates.length === 0) {
-      alert('لا يوجد لاعبين قابلين للترقية من بين المسجلين');
+      alert('لا يوجد لاعبين قابلين للترقية من بين المسجلين. تأكد من أن أحزمة اللاعبين مطابقة للقائمة المعتمدة.');
       return;
     }
 
-    // 3. Update player belts in a transaction-like manner (using promises)
-    const updatePromises = playerUpdates.map(update =>
-      supabase.from('players').update({ belt: update.newBelt }).eq('id', update.id)
-    );
+    // 3. Update player belts one by one
+    let successCount = 0;
+    let errorCount = 0;
 
-    const promotionPromise = supabase.from('belt_promotions').insert(promotionsToInsert);
+    for (const update of playerUpdates) {
+      const { error: updateError } = await supabase
+        .from('players')
+        .update({ belt: update.newBelt })
+        .eq('id', update.id);
+      
+      if (updateError) {
+        console.error(`Error updating player ${update.playerName}:`, updateError);
+        errorCount++;
+      } else {
+        console.log(`Successfully updated ${update.playerName} from ${update.oldBelt} to ${update.newBelt}`);
+        successCount++;
+      }
+    }
 
-    const results = await Promise.all([...updatePromises, promotionPromise]);
+    // 4. Insert promotion records
+    if (promotionsToInsert.length > 0) {
+      const { error: promotionError } = await supabase
+        .from('belt_promotions')
+        .insert(promotionsToInsert);
+      
+      if (promotionError) {
+        console.error('Error inserting promotions:', promotionError);
+      }
+    }
 
-    // Check for errors
-    const updateErrors = results.slice(0, -1).filter(r => r.error);
-    const promotionError = results[results.length - 1].error;
-
-    if (updateErrors.length > 0 || promotionError) {
-      console.error('Promotion errors:', { updateErrors, promotionError });
-      alert('حدث خطأ أثناء ترقية اللاعبين. يرجى المحاولة مرة أخرى.');
-    } else {
-      alert(`تم ترقية ${playerUpdates.length} لاعب بنجاح!`);
+    if (successCount > 0) {
+      alert(`تم ترقية ${successCount} لاعب بنجاح!${errorCount > 0 ? `\nفشل ترقية ${errorCount} لاعب.` : ''}`);
       // Refresh the registrations view to show updated belts
       if (registrationsView) {
         viewRegistrations(registrationsView.type, registrationsView.periodId, registrationsView.periodName);
       }
+      // Also refresh players data
+      loadData();
+    } else {
+      alert('حدث خطأ أثناء ترقية اللاعبين. يرجى المحاولة مرة أخرى.');
     }
   };
   // --- End Belt Promotion Logic ---
@@ -834,6 +891,50 @@ function RegistrationsModal({
   // Only show the confirm button for exam periods
   const showConfirmButton = periodType === 'exam';
 
+  // Helper function to get next belt for display
+  const getNextBeltDisplay = (currentBelt: string | null): string | null => {
+    const beltHierarchy: string[] = [
+      'white',
+      'yellow 10', 'yellow 9',
+      'orange 8', 'orange 7',
+      'green 6', 'green 5',
+      'blue 4', 'blue 3',
+      'brown 2', 'brown 1',
+      'black 1', 'black 2', 'black 3', 'black 4', 'black 5', 'black 6', 'black 7', 'black 8', 'black 9', 'black 10'
+    ];
+    
+    const normalizeForDisplay = (belt: string | null): string => {
+      if (!belt) return 'white';
+      let normalized = belt.toLowerCase().trim();
+      normalized = normalized.replace(/١/g, '1').replace(/٢/g, '2').replace(/٣/g, '3')
+        .replace(/٤/g, '4').replace(/٥/g, '5').replace(/٦/g, '6')
+        .replace(/٧/g, '7').replace(/٨/g, '8').replace(/٩/g, '9').replace(/٠/g, '0');
+      return normalized;
+    };
+    
+    const normalizedCurrent = normalizeForDisplay(currentBelt);
+    
+    if (normalizedCurrent === 'black') return 'black 1';
+    
+    const currentIndex = beltHierarchy.findIndex(belt => normalizeForDisplay(belt) === normalizedCurrent);
+    
+    if (currentIndex === -1) {
+      if (normalizedCurrent.includes('yellow')) return 'yellow 9';
+      if (normalizedCurrent.includes('orange')) return 'orange 7';
+      if (normalizedCurrent.includes('green')) return 'green 5';
+      if (normalizedCurrent.includes('blue')) return 'blue 3';
+      if (normalizedCurrent.includes('brown')) return 'brown 1';
+      if (normalizedCurrent.includes('black')) return 'black 1';
+      return null;
+    }
+    
+    if (currentIndex === beltHierarchy.length - 1) {
+      return null;
+    }
+    
+    return beltHierarchy[currentIndex + 1];
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
@@ -915,8 +1016,8 @@ function RegistrationsModal({
                       </thead>
                       <tbody>
                         {coachRegistrations.map((reg: Registration) => {
-                          const currentBelt = reg.player?.belt || reg.last_belt || 'أبيض';
-                          const nextBelt = getNextBeltForDisplay(currentBelt);
+                          const currentBelt = reg.player?.belt || reg.last_belt || 'white';
+                          const nextBelt = getNextBeltDisplay(currentBelt);
                           return (
                             <tr key={reg.id} className="border-t hover:bg-gray-50">
                               <td className="px-4 py-3 text-sm text-gray-900">{reg.player?.full_name || reg.player_name}</td>
@@ -944,26 +1045,6 @@ function RegistrationsModal({
       </div>
     </div>
   );
-}
-
-// Helper function for display (same logic as getNextBelt but returns formatted string)
-function getNextBeltForDisplay(currentBelt: string | null): string | null {
-  const beltHierarchy: string[] = [
-    'white',
-    'yellow 10', 'yellow 9',
-    'orange 8', 'orange 7',
-    'green 6', 'green 5',
-    'blue 4', 'blue 3',
-    'brown 2', 'brown 1',
-    'black 1', 'black 2', 'black 3', 'black 4', 'black 5', 'black 6', 'black 7', 'black 8', 'black 9', 'black 10'
-  ];
-  
-  if (!currentBelt) return beltHierarchy[0];
-  const currentIndex = beltHierarchy.indexOf(currentBelt);
-  if (currentIndex === -1 || currentIndex === beltHierarchy.length - 1) {
-    return null;
-  }
-  return beltHierarchy[currentIndex + 1];
 }
 
 // FormModal component (unchanged)
