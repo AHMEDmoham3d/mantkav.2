@@ -196,53 +196,29 @@ export default function AdminDashboard() {
 
   // --- Belt Promotion Logic ---
   const beltHierarchy: string[] = [
-    'white',
-    'yellow 10', 'yellow 9',
-    'orange 8', 'orange 7',
-    'green 6', 'green 5',
-    'blue 4', 'blue 3',
-    'brown 2', 'brown 1',
-    'black 1', 'black 2', 'black 3', 'black 4', 'black 5', 'black 6', 'black 7', 'black 8', 'black 9', 'black 10'
+    'أبيض - 12',
+    'أصفر - 11', 'أصفر - 10', 'أصفر - 9',
+    'برتقالى - 8', 'برتقالى - 7',
+    'اخضر - 6', 'اخضر - 5',
+    'ازرق - 4', 'ازرق - 3',
+    'بني - 2', 'بني - 1',
+    'دان - 1', 'دان - 2', 'دان - 3', 'دان - 4'
   ];
 
-  // Helper function to normalize belt strings for comparison
-  const normalizeBelt = (belt: string | null): string => {
-    if (!belt) return 'white';
-    // Convert to lowercase and trim
-    let normalized = belt.toLowerCase().trim();
-    // Handle Arabic numbers if they exist
-    normalized = normalized.replace(/١/g, '1').replace(/٢/g, '2').replace(/٣/g, '3')
-      .replace(/٤/g, '4').replace(/٥/g, '5').replace(/٦/g, '6')
-      .replace(/٧/g, '7').replace(/٨/g, '8').replace(/٩/g, '9').replace(/٠/g, '0');
-    return normalized;
-  };
-
   const getNextBelt = (currentBelt: string | null): string | null => {
-    const normalizedCurrent = normalizeBelt(currentBelt);
-    
-    // Special handling for black belt without number
-    if (normalizedCurrent === 'black') {
-      return 'black 1';
-    }
-    
-    const currentIndex = beltHierarchy.findIndex(belt => normalizeBelt(belt) === normalizedCurrent);
-    
+    if (!currentBelt) return null;
+
+    const currentIndex = beltHierarchy.findIndex(belt => belt === currentBelt);
+
     if (currentIndex === -1) {
-      console.log('Belt not found in hierarchy:', currentBelt);
-      // Try to find by partial match
-      if (normalizedCurrent.includes('yellow')) return 'yellow 9';
-      if (normalizedCurrent.includes('orange')) return 'orange 7';
-      if (normalizedCurrent.includes('green')) return 'green 5';
-      if (normalizedCurrent.includes('blue')) return 'blue 3';
-      if (normalizedCurrent.includes('brown')) return 'brown 1';
-      if (normalizedCurrent.includes('black')) return 'black 1';
+      console.log('Belt not found:', currentBelt);
       return null;
     }
-    
+
     if (currentIndex === beltHierarchy.length - 1) {
-      return null; // Already at max belt
+      return null;
     }
-    
+
     return beltHierarchy[currentIndex + 1];
   };
 
@@ -289,7 +265,7 @@ export default function AdminDashboard() {
         playerUpdates.push({
           id: player.id,
           newBelt: nextBelt,
-          oldBelt: currentBelt || 'white',
+          oldBelt: currentBelt || 'أبيض - 12',
           playerName: player.full_name
         });
         promotionsToInsert.push({
@@ -865,6 +841,28 @@ function RegistrationsModal({
   const [searchTerm, setSearchTerm] = useState('');
   const [promotingCoachId, setPromotingCoachId] = useState<string | null>(null);
   
+  const beltHierarchy: string[] = [
+    'أبيض - 12',
+    'أصفر - 11', 'أصفر - 10', 'أصفر - 9',
+    'برتقالى - 8', 'برتقالى - 7',
+    'اخضر - 6', 'اخضر - 5',
+    'ازرق - 4', 'ازرق - 3',
+    'بني - 2', 'بني - 1',
+    'دان - 1', 'دان - 2', 'دان - 3', 'دان - 4'
+  ];
+
+  const getNextBeltDisplay = (currentBelt: string | null): string | null => {
+    if (!currentBelt) return null;
+
+    const currentIndex = beltHierarchy.findIndex(belt => belt === currentBelt);
+
+    if (currentIndex === -1) return null;
+
+    if (currentIndex === beltHierarchy.length - 1) return null;
+
+    return beltHierarchy[currentIndex + 1];
+  };
+  
   // Group registrations by coach
   const groupedByCoach: Record<string, Registration[]> = registrations.reduce((acc: Record<string, Registration[]>, reg: Registration) => {
     const coachName = reg.coach?.full_name || 'مدرب غير معروف';
@@ -890,50 +888,6 @@ function RegistrationsModal({
 
   // Only show the confirm button for exam periods
   const showConfirmButton = periodType === 'exam';
-
-  // Helper function to get next belt for display
-  const getNextBeltDisplay = (currentBelt: string | null): string | null => {
-    const beltHierarchy: string[] = [
-      'white',
-      'yellow 10', 'yellow 9',
-      'orange 8', 'orange 7',
-      'green 6', 'green 5',
-      'blue 4', 'blue 3',
-      'brown 2', 'brown 1',
-      'black 1', 'black 2', 'black 3', 'black 4', 'black 5', 'black 6', 'black 7', 'black 8', 'black 9', 'black 10'
-    ];
-    
-    const normalizeForDisplay = (belt: string | null): string => {
-      if (!belt) return 'white';
-      let normalized = belt.toLowerCase().trim();
-      normalized = normalized.replace(/١/g, '1').replace(/٢/g, '2').replace(/٣/g, '3')
-        .replace(/٤/g, '4').replace(/٥/g, '5').replace(/٦/g, '6')
-        .replace(/٧/g, '7').replace(/٨/g, '8').replace(/٩/g, '9').replace(/٠/g, '0');
-      return normalized;
-    };
-    
-    const normalizedCurrent = normalizeForDisplay(currentBelt);
-    
-    if (normalizedCurrent === 'black') return 'black 1';
-    
-    const currentIndex = beltHierarchy.findIndex(belt => normalizeForDisplay(belt) === normalizedCurrent);
-    
-    if (currentIndex === -1) {
-      if (normalizedCurrent.includes('yellow')) return 'yellow 9';
-      if (normalizedCurrent.includes('orange')) return 'orange 7';
-      if (normalizedCurrent.includes('green')) return 'green 5';
-      if (normalizedCurrent.includes('blue')) return 'blue 3';
-      if (normalizedCurrent.includes('brown')) return 'brown 1';
-      if (normalizedCurrent.includes('black')) return 'black 1';
-      return null;
-    }
-    
-    if (currentIndex === beltHierarchy.length - 1) {
-      return null;
-    }
-    
-    return beltHierarchy[currentIndex + 1];
-  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -1016,7 +970,7 @@ function RegistrationsModal({
                       </thead>
                       <tbody>
                         {coachRegistrations.map((reg: Registration) => {
-                          const currentBelt = reg.player?.belt || reg.last_belt || 'white';
+                          const currentBelt = reg.player?.belt || reg.last_belt || 'أبيض - 12';
                           const nextBelt = getNextBeltDisplay(currentBelt);
                           return (
                             <tr key={reg.id} className="border-t hover:bg-gray-50">
@@ -1420,22 +1374,26 @@ function FormModal({
                 </label>
                 <select
                   required
-                  value={formData.belt || 'white'}
+                  value={formData.belt || 'أبيض - 12'}
                   onChange={(e) => setFormData({ ...formData, belt: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="white">أبيض</option>
-                  <option value="yellow 10">اصفر 10</option>
-                  <option value="yellow 9">اصفر 9</option>
-                  <option value="orange 8">برتقالى 8</option>
-                  <option value="orange 7">برتقالى 7</option>
-                  <option value="green 6">اخضر 6</option>
-                  <option value="green 5">اخضر 5</option>
-                  <option value="blue 4">ازرق 4</option>
-                  <option value="blue 3">ازرق 3</option>
-                  <option value="brown 2">بنى 2</option>
-                  <option value="brown 1">بنى 1</option>
-                  <option value="black">أسود</option>
+                  <option value="أبيض - 12">أبيض - 12</option>
+                  <option value="أصفر - 11">أصفر - 11</option>
+                  <option value="أصفر - 10">أصفر - 10</option>
+                  <option value="أصفر - 9">أصفر - 9</option>
+                  <option value="برتقالى - 8">برتقالى - 8</option>
+                  <option value="برتقالى - 7">برتقالى - 7</option>
+                  <option value="اخضر - 6">اخضر - 6</option>
+                  <option value="اخضر - 5">اخضر - 5</option>
+                  <option value="ازرق - 4">ازرق - 4</option>
+                  <option value="ازرق - 3">ازرق - 3</option>
+                  <option value="بني - 2">بني - 2</option>
+                  <option value="بني - 1">بني - 1</option>
+                  <option value="دان - 1">دان - 1</option>
+                  <option value="دان - 2">دان - 2</option>
+                  <option value="دان - 3">دان - 3</option>
+                  <option value="دان - 4">دان - 4</option>
                 </select>
               </div>
               <div>
