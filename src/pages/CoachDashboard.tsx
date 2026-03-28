@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, Player, Coach } from '../lib/supabase';
-import { LogOut, Search, UserCircle, Calendar, Trophy, BookOpen, Loader2, XCircle, FileText, Printer } from 'lucide-react';
+import { LogOut, Search, UserCircle, Calendar, Trophy, BookOpen, Loader2, XCircle } from 'lucide-react';
 
 interface ExtendedPlayer extends Player {
   examRegistered?: boolean;
@@ -30,16 +30,6 @@ interface ChampionshipPeriod {
   end_date: string;
 }
 
-interface RegisteredPlayer {
-  id: string;
-  full_name: string;
-  birth_date: string | null;
-  belt: string | null;
-  phone: string | null;
-  file_number: number | null;
-  registration_date: string;
-}
-
 export default function CoachDashboard() {
   const { signOut, user } = useAuth();
   const [coach, setCoach] = useState<Coach | null>(null);
@@ -51,13 +41,6 @@ export default function CoachDashboard() {
   const [registeringType, setRegisteringType] = useState<'exam' | 'secondary' | 'championship' | null>(null);
   const [cancellingPlayer, setCancellingPlayer] = useState<string | null>(null);
   const [cancellingType, setCancellingType] = useState<'exam' | 'secondary' | 'championship' | null>(null);
-  
-  // Report modal state
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [reportType, setReportType] = useState<'exam' | 'secondary' | 'championship' | null>(null);
-  const [reportPlayers, setReportPlayers] = useState<RegisteredPlayer[]>([]);
-  const [reportPeriodName, setReportPeriodName] = useState('');
-  const [loadingReport, setLoadingReport] = useState(false);
   
   // Active periods
   const [activeExam, setActiveExam] = useState<ExamPeriod | null>(null);
@@ -215,7 +198,7 @@ export default function CoachDashboard() {
             coach_id: coach.id,
             player_name: player.full_name,
             birth_date: player.birth_date,
-            last_belt: player.belt || 'أبيض - 12',
+            last_belt: player.belt || 'white',
           }]);
 
         if (error) throw error;
@@ -237,7 +220,7 @@ export default function CoachDashboard() {
             coach_id: coach.id,
             player_name: player.full_name,
             birth_date: player.birth_date,
-            last_belt: player.belt || 'أبيض - 12',
+            last_belt: player.belt || 'white',
           }]);
 
         if (error) throw error;
@@ -259,7 +242,7 @@ export default function CoachDashboard() {
             coach_id: coach.id,
             player_name: player.full_name,
             birth_date: player.birth_date,
-            last_belt: player.belt || 'أبيض - 12',
+            last_belt: player.belt || 'white',
           }]);
 
         if (error) throw error;
@@ -353,184 +336,32 @@ export default function CoachDashboard() {
     }
   };
 
-  // New function to load registered players report
-  const loadRegisteredPlayersReport = async (type: 'exam' | 'secondary' | 'championship') => {
-    if (!coach) return;
-
-    setLoadingReport(true);
-    setReportType(type);
-    
-    try {
-      let periodId = '';
-      let periodName = '';
-      let tableName = '';
-
-      if (type === 'exam' && activeExam) {
-        periodId = activeExam.id;
-        periodName = activeExam.name;
-        tableName = 'exam_registrations';
-      } else if (type === 'secondary' && activeSecondary) {
-        periodId = activeSecondary.id;
-        periodName = activeSecondary.name;
-        tableName = 'secondary_registrations';
-      } else if (type === 'championship' && activeChampionship) {
-        periodId = activeChampionship.id;
-        periodName = activeChampionship.name;
-        tableName = 'tournament_registrations';
-      } else {
-        alert('لا توجد فترة نشطة لهذا النوع');
-        setLoadingReport(false);
-        return;
-      }
-
-      // Fetch registered players with their details
-      const { data: registrations, error } = await supabase
-        .from(tableName)
-        .select(`
-          *,
-          player:players(*)
-        `)
-        .eq(`${type === 'exam' ? 'exam_period_id' : type === 'secondary' ? 'secondary_period_id' : 'tournament_period_id'}`, periodId)
-        .eq('coach_id', coach.id);
-
-      if (error) throw error;
-
-      const registeredPlayers: RegisteredPlayer[] = (registrations || []).map(reg => ({
-        id: reg.player.id,
-        full_name: reg.player.full_name,
-        birth_date: reg.player.birth_date,
-        belt: reg.player.belt,
-        phone: reg.player.phone,
-        file_number: reg.player.file_number,
-        registration_date: reg.created_at ? new Date(reg.created_at).toLocaleDateString('ar-EG') : new Date().toLocaleDateString('ar-EG')
-      }));
-
-      setReportPlayers(registeredPlayers);
-      setReportPeriodName(periodName);
-      setShowReportModal(true);
-    } catch (error) {
-      console.error('Error loading report:', error);
-      alert('حدث خطأ أثناء تحميل التقرير');
-    } finally {
-      setLoadingReport(false);
-    }
-  };
-
-  const printReport = () => {
-    const printContent = document.getElementById('report-content');
-    if (!printContent) return;
-
-    const originalTitle = document.title;
-    document.title = `تقرير المسجلين - ${reportPeriodName}`;
-    
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(`
-        <html dir="rtl">
-          <head>
-            <title>تقرير المسجلين - ${reportPeriodName}</title>
-            <style>
-              body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                margin: 20px;
-                padding: 0;
-              }
-              .header {
-                text-align: center;
-                margin-bottom: 30px;
-                border-bottom: 2px solid #333;
-                padding-bottom: 20px;
-              }
-              .header h1 {
-                margin: 0;
-                color: #1e3a8a;
-              }
-              .header h2 {
-                margin: 10px 0 0;
-                color: #4b5563;
-              }
-              .info {
-                margin-bottom: 20px;
-                padding: 15px;
-                background-color: #f3f4f6;
-                border-radius: 8px;
-              }
-              .info p {
-                margin: 5px 0;
-              }
-              table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 20px;
-              }
-              th, td {
-                border: 1px solid #ddd;
-                padding: 10px;
-                text-align: right;
-              }
-              th {
-                background-color: #1e3a8a;
-                color: white;
-                font-weight: bold;
-              }
-              .footer {
-                margin-top: 30px;
-                text-align: center;
-                font-size: 12px;
-                color: #6b7280;
-                border-top: 1px solid #ddd;
-                padding-top: 20px;
-              }
-              @media print {
-                body {
-                  margin: 0;
-                  padding: 10px;
-                }
-                .no-print {
-                  display: none;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            ${printContent.outerHTML}
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-      printWindow.close();
-    }
-    
-    document.title = originalTitle;
-  };
-
   const getBeltColor = (belt: string | null) => {
     const beltLower = belt?.toLowerCase() || 'white';
     const colors: Record<string, string> = {
-      'أبيض - 12': 'bg-gray-200 text-gray-800',
-      'أصفر - 11': 'bg-yellow-200 text-yellow-800',
-      'أصفر - 10': 'bg-yellow-200 text-yellow-800',
-      'أصفر - 9': 'bg-yellow-200 text-yellow-800',
-      'برتقالى - 8': 'bg-orange-200 text-orange-800',
-      'برتقالى - 7': 'bg-orange-200 text-orange-800',
-      'اخضر - 6': 'bg-green-200 text-green-800',
-      'اخضر - 5': 'bg-green-200 text-green-800',
-      'ازرق - 4': 'bg-blue-200 text-blue-800',
-      'ازرق - 3': 'bg-blue-200 text-blue-800',
-      'بني - 2': 'bg-amber-700 text-white',
-      'بني - 1': 'bg-amber-700 text-white',
-      'دان - 1': 'bg-gray-900 text-white',
-      'دان - 2': 'bg-gray-900 text-white',
-      'دان - 3': 'bg-gray-900 text-white',
-      'دان - 4': 'bg-gray-900 text-white',
+      white: 'bg-gray-200 text-gray-800',
+      yellow: 'bg-yellow-200 text-yellow-800',
+      orange: 'bg-orange-200 text-orange-800',
+      green: 'bg-green-200 text-green-800',
+      blue: 'bg-blue-200 text-blue-800',
+      brown: 'bg-amber-700 text-white',
+      black: 'bg-gray-900 text-white',
     };
     return colors[beltLower] || 'bg-gray-200 text-gray-800';
   };
 
   const getBeltName = (belt: string | null) => {
-    if (!belt) return 'أبيض - 12';
-    return belt;
+    const beltLower = belt?.toLowerCase() || 'white';
+    const names: Record<string, string> = {
+      white: 'أبيض',
+      yellow: 'أصفر',
+      orange: 'برتقالي',
+      green: 'أخضر',
+      blue: 'أزرق',
+      brown: 'بني',
+      black: 'أسود',
+    };
+    return names[beltLower] || belt || 'أبيض';
   };
 
   const isRegistering = (playerId: string, type: 'exam' | 'secondary' | 'championship') => {
@@ -573,27 +404,13 @@ export default function CoachDashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Active Periods Cards with Report Buttons */}
+        {/* Active Periods Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           {activeExam && (
             <div className="bg-white rounded-xl shadow-sm border p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <Calendar className="w-6 h-6 text-blue-600" />
-                  <h3 className="font-semibold text-lg">فترة الاختبارات</h3>
-                </div>
-                <button
-                  onClick={() => loadRegisteredPlayersReport('exam')}
-                  disabled={loadingReport}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition text-sm"
-                >
-                  {loadingReport && reportType === 'exam' ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <FileText className="w-4 h-4" />
-                  )}
-                  <span>عرض الكشف</span>
-                </button>
+              <div className="flex items-center gap-3 mb-3">
+                <Calendar className="w-6 h-6 text-blue-600" />
+                <h3 className="font-semibold text-lg">فترة الاختبارات</h3>
               </div>
               <p className="text-sm text-gray-600 mb-1">{activeExam.name}</p>
               <p className="text-xs text-gray-500">
@@ -606,23 +423,9 @@ export default function CoachDashboard() {
           
           {activeSecondary && (
             <div className="bg-white rounded-xl shadow-sm border p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <BookOpen className="w-6 h-6 text-green-600" />
-                  <h3 className="font-semibold text-lg">التسجيل الثانوي</h3>
-                </div>
-                <button
-                  onClick={() => loadRegisteredPlayersReport('secondary')}
-                  disabled={loadingReport}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg transition text-sm"
-                >
-                  {loadingReport && reportType === 'secondary' ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <FileText className="w-4 h-4" />
-                  )}
-                  <span>عرض الكشف</span>
-                </button>
+              <div className="flex items-center gap-3 mb-3">
+                <BookOpen className="w-6 h-6 text-green-600" />
+                <h3 className="font-semibold text-lg">التسجيل الثانوي</h3>
               </div>
               <p className="text-sm text-gray-600 mb-1">{activeSecondary.name}</p>
               <p className="text-xs text-gray-500">
@@ -635,23 +438,9 @@ export default function CoachDashboard() {
           
           {activeChampionship && (
             <div className="bg-white rounded-xl shadow-sm border p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <Trophy className="w-6 h-6 text-yellow-600" />
-                  <h3 className="font-semibold text-lg">البطولة</h3>
-                </div>
-                <button
-                  onClick={() => loadRegisteredPlayersReport('championship')}
-                  disabled={loadingReport}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-lg transition text-sm"
-                >
-                  {loadingReport && reportType === 'championship' ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <FileText className="w-4 h-4" />
-                  )}
-                  <span>عرض الكشف</span>
-                </button>
+              <div className="flex items-center gap-3 mb-3">
+                <Trophy className="w-6 h-6 text-yellow-600" />
+                <h3 className="font-semibold text-lg">البطولة</h3>
               </div>
               <p className="text-sm text-gray-600 mb-1">{activeChampionship.name}</p>
               <p className="text-xs text-gray-500">
@@ -844,94 +633,6 @@ export default function CoachDashboard() {
           </div>
         </div>
       </div>
-
-      {/* Report Modal */}
-      {showReportModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
-              <h3 className="text-lg font-semibold text-gray-900">
-                كشف المسجلين - {reportPeriodName}
-              </h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={printReport}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>طباعة</span>
-                </button>
-                <button
-                  onClick={() => setShowReportModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition"
-                >
-                  <XCircle className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="p-6" id="report-content">
-              <div className="text-center mb-6">
-                <h1 className="text-2xl font-bold text-blue-800">نظام إدارة الكاراتيه</h1>
-                <h2 className="text-xl font-semibold text-gray-700 mt-2">منطقة الإسكندرية</h2>
-                <h3 className="text-lg font-medium text-gray-600 mt-1">كشف المسجلين في {reportPeriodName}</h3>
-              </div>
-
-              <div className="info mb-6 p-4 bg-gray-50 rounded-lg">
-                <p><strong>المدرب:</strong> {coach?.full_name}</p>
-                <p><strong>المؤسسة:</strong> {coach?.organization?.name}</p>
-                <p><strong>تاريخ الكشف:</strong> {new Date().toLocaleDateString('ar-EG')}</p>
-                <p><strong>عدد المسجلين:</strong> {reportPlayers.length} لاعب</p>
-              </div>
-
-              {reportPlayers.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-gray-500">لا يوجد لاعبين مسجلين في هذه الفترة</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-blue-800 text-white">
-                        <th className="px-4 py-3 text-right">م</th>
-                        <th className="px-4 py-3 text-right">الاسم</th>
-                        <th className="px-4 py-3 text-right">الرقم</th>
-                        <th className="px-4 py-3 text-right">تاريخ الميلاد</th>
-                        <th className="px-4 py-3 text-right">الحزام</th>
-                        <th className="px-4 py-3 text-right">رقم الهاتف</th>
-                        <th className="px-4 py-3 text-right">تاريخ التسجيل</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reportPlayers.map((player, index) => (
-                        <tr key={player.id} className="border-b hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm">{index + 1}</td>
-                          <td className="px-4 py-3 text-sm font-medium">{player.full_name}</td>
-                          <td className="px-4 py-3 text-sm">{player.file_number || '-'}</td>
-                          <td className="px-4 py-3 text-sm">
-                            {player.birth_date ? new Date(player.birth_date).toLocaleDateString('ar-EG') : '-'}
-                          </td>
-                          <td className="px-4 py-3 text-sm">
-                            <span className={`px-2 py-1 rounded-full text-xs ${getBeltColor(player.belt)}`}>
-                              {getBeltName(player.belt)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm">{player.phone || '-'}</td>
-                          <td className="px-4 py-3 text-sm">{player.registration_date}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <div className="footer mt-6 pt-4 text-center text-sm text-gray-500 border-t">
-                <p>تم إنشاء هذا التقرير بواسطة نظام إدارة الكاراتيه - منطقة الإسكندرية</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
