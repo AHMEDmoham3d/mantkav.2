@@ -1,7 +1,7 @@
-# TODO: Fix unused import warnings in AdminDashboard.tsx
+# Fix TypeScript Warnings in CoachDashboard.tsx
 
-- [x] Create TODO.md with plan steps
-- [x] Remove unused imports: ChevronDown, ChevronUp, RefreshCw, FileText from src/pages/AdminDashboard.tsx
-- [x] Verify TypeScript errors are resolved (check VSCode or run tsc)
-- [ ] Complete task and attempt_completion
+## Steps:
+- [x] Step 1: Edit src/pages/CoachDashboard.tsx to remove unused 'Eye' import and 'periodTable' variable
+- [x] Step 2: Verify warnings are resolved (file re-read, unused declarations removed)
+- [x] Step 3: Mark complete and cleanup TODO.md
 
